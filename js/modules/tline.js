@@ -391,17 +391,22 @@
     const L = 40, Rm = 12, T = 24, B = 34, pw = w - L - Rm, ph = h - T - B;
     ctx.font = '11px ' + mono(); ctx.textBaseline = 'middle';
     if (!c.valid) { ctx.fillStyle = COL.text; ctx.textAlign = 'center'; ctx.fillText('Invalid inputs', w / 2, h / 2); return; }
-    const dmax = Math.max(S.len, 0.5), N = 500, V = [], I = [];
-    let ymax = 1;
-    for (let i = 0; i <= N; i++) { const o = M.vi(c.GL, dmax * i / N, c.a), v = o.V.abs(), j = o.ZI.abs(); V.push(v); I.push(j); ymax = Math.max(ymax, v, j); }
-    ymax = Math.ceil(ymax * 10 * 1.05) / 10;
+    const dmax = Math.max(S.len, 0.5), N = 500, V = [], I = [], YCAP = 1e6;
+    // On a lossy line the forward wave (V+ = 1 at the load) grows as e^{alpha d} toward the generator and can overflow
+    // for long lines; clamp to a finite cap so the axis loops below are always bounded (an unbounded ymax froze the page).
+    let ymax = 1, clipped = false;
+    const fin = v => (Number.isFinite(v) && v <= YCAP) ? v : (clipped = true, YCAP);
+    for (let i = 0; i <= N; i++) { const o = M.vi(c.GL, dmax * i / N, c.a), v = fin(o.V.abs()), j = fin(o.ZI.abs()); V.push(v); I.push(j); ymax = Math.max(ymax, v, j); }
+    ymax = Math.min(YCAP, Math.ceil(ymax * 10 * 1.05) / 10);
     const X = d => L + pw * d / dmax, Y = v => T + ph * (1 - v / ymax);
+    const niceStep = raw => { const p = Math.pow(10, Math.floor(Math.log10(raw))), f = raw / p; return (f < 1.5 ? 1 : f < 3.5 ? 2 : f < 7.5 ? 5 : 10) * p; };
     ctx.strokeStyle = COL.grid; ctx.fillStyle = COL.text; ctx.textAlign = 'right';
-    const ystep = ymax > 1.2 ? 0.5 : 0.25;
-    for (let v = 0; v <= ymax + 1e-9; v += ystep) { ctx.beginPath(); ctx.moveTo(L, Y(v)); ctx.lineTo(L + pw, Y(v)); ctx.stroke(); ctx.fillText(v.toFixed(2), L - 4, Y(v)); }
+    const ystep = ymax > 1.2 ? niceStep(ymax / 4) : 0.25;                      // at most ~8 grid lines whatever the range
+    for (let v = 0; v <= ymax + 1e-9; v += ystep) { ctx.beginPath(); ctx.moveTo(L, Y(v)); ctx.lineTo(L + pw, Y(v)); ctx.stroke(); ctx.fillText(v >= 1e4 ? v.toExponential(1) : FSP.fmtNum(v, 3), L - 4, Y(v)); }
     ctx.textAlign = 'center';
-    const xstep = dmax > 1.6 ? 0.5 : dmax > 0.8 ? 0.25 : 0.125;
-    for (let d = 0; d <= dmax + 1e-9; d += xstep) { ctx.beginPath(); ctx.moveTo(X(d), T); ctx.lineTo(X(d), T + ph); ctx.stroke(); ctx.fillText(d.toFixed(3).replace(/\.?0+$/, '') || '0', X(d), T + ph + 12); }
+    const xstep = dmax > 1.6 ? niceStep(dmax / 8) : dmax > 0.8 ? 0.25 : 0.125;
+    for (let d = 0; d <= dmax + 1e-9; d += xstep) { ctx.beginPath(); ctx.moveTo(X(d), T); ctx.lineTo(X(d), T + ph); ctx.stroke(); ctx.fillText(FSP.fmtNum(d, 4), X(d), T + ph + 12); }
+    if (clipped) { ctx.fillStyle = COL.org; ctx.textAlign = 'right'; ctx.fillText('amplitude clipped at ' + YCAP.toExponential(0) + ' (loss × length too large)', L + pw - 4, T + 10); ctx.fillStyle = COL.text; ctx.textAlign = 'center'; }
     ctx.fillText('distance from load d (λ)', L + pw / 2, h - 8);
     const line = (arr, col) => { ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.beginPath(); arr.forEach((v, i) => { const x = X(dmax * i / N), y = Y(v); if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); }); ctx.stroke(); ctx.lineWidth = 1; };
     line(V, COL.acc); line(I, COL.org);
