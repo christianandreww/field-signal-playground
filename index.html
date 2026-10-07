@@ -1,0 +1,1317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Field &amp; Signal Playground</title>
+<style>
+:root{
+  --bg:#0b0f17;--panel:#121826;--panel2:#0f141f;--border:#243047;--text:#e6edf3;--muted:#8b98ab;
+  --accent:#4cc9f0;--accent2:#f9a03f;--pink:#f72585;--ok:#2ecc71;--bad:#ff5c5c;--warn:#ffb347;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+}
+*{box-sizing:border-box}
+[hidden]{display:none !important}
+html,body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{position:sticky;top:0;z-index:5;background:linear-gradient(180deg,#0f1420,#0b0f17);border-bottom:1px solid var(--border);padding:8px 16px;display:flex;flex-wrap:wrap;gap:8px 20px;align-items:center}
+h1{font-size:16px;margin:0;letter-spacing:.3px}
+h1 small{color:var(--muted);font-weight:400;margin-left:6px}
+.tabs{display:flex;gap:4px}
+[role=tab]{background:transparent;color:var(--muted);border:1px solid transparent;border-radius:8px;padding:6px 12px;font:inherit;cursor:pointer}
+[role=tab][aria-selected=true]{color:var(--text);background:var(--panel);border-color:var(--border)}
+[role=tab]:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+main{padding:12px 16px 40px}
+.layout{display:grid;grid-template-columns:1fr;gap:12px}
+@media(min-width:960px){.layout{grid-template-columns:320px minmax(0,1fr)}}
+.controls{display:flex;flex-direction:column;gap:10px;min-width:0}
+fieldset{border:1px solid var(--border);border-radius:10px;background:var(--panel);padding:8px 10px 10px;margin:0;min-width:0}
+legend{color:var(--accent);font-size:12px;text-transform:uppercase;letter-spacing:.6px;padding:0 4px}
+.ctl{display:grid;grid-template-columns:72px 1fr auto;gap:6px;align-items:center;margin:4px 0}
+.ctl label,.ctl>span:first-child{color:var(--muted);font-size:12px}
+.ctl output{font-family:var(--mono);font-size:12px;min-width:64px;text-align:right}
+input[type=range]{width:100%;min-width:0;accent-color:var(--accent)}
+input[type=number],select{background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:3px 5px;font:12px var(--mono);width:84px}
+select{width:auto;font-family:inherit}
+.num{width:78px}
+.row{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:4px 0}
+.note{color:var(--muted);font-size:12px;margin:3px 0}
+.seg{display:inline-flex;flex-wrap:wrap;gap:4px}
+.seg-btn,button.btn{background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:4px 10px;font:inherit;font-size:12px;cursor:pointer}
+.seg-btn.active,.seg-btn[aria-pressed=true]{background:#1d2b44;border-color:var(--accent);color:#fff}
+button.btn.primary{background:#164e63;border-color:var(--accent)}
+button:disabled{opacity:.5;cursor:not-allowed}
+.stage{display:flex;flex-direction:column;gap:12px;min-width:0}
+.canvas-wrap{background:var(--panel);border:1px solid var(--border);border-radius:10px;overflow:hidden;position:relative}
+canvas{display:block;width:100%;touch-action:none}
+#em-canvas{aspect-ratio:16/10;min-height:260px}
+#em-rt{aspect-ratio:4/1;min-height:140px}
+#dsp-zplane{aspect-ratio:1/1}
+#dsp-mag,#dsp-phase{aspect-ratio:2.4/1;min-height:140px}
+#dsp-impulse{aspect-ratio:3.2/1;min-height:140px}
+#dsp-spectrum{aspect-ratio:2.6/1;min-height:180px}
+#dsp-zplane:focus-visible{outline:2px solid var(--accent)}
+.grid2{display:grid;grid-template-columns:1fr;gap:12px}
+@media(min-width:720px){.grid2{grid-template-columns:minmax(220px,340px) minmax(0,1fr)}}
+.grid2>.canvas-wrap{align-self:start}
+.hud{font-family:var(--mono);font-size:12px;display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:2px 16px;background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:8px 12px}
+.hud div{display:flex;justify-content:space-between;gap:8px;border-bottom:1px dashed #1c2536;padding:2px 0}
+.hud div span:first-child{color:var(--muted)}
+.badge{display:inline-block;font:11px var(--mono);padding:1px 7px;border-radius:999px;border:1px solid var(--border);background:var(--panel2)}
+.badge.ok{border-color:var(--ok);color:var(--ok)}
+.badge.bad{border-color:var(--bad);color:var(--bad)}
+.badge.warn{border-color:var(--warn);color:var(--warn)}
+.mono{font-family:var(--mono)}
+pre{margin:0;font:12px/1.5 var(--mono);white-space:pre-wrap;word-break:break-word}
+details.theory{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:8px 12px}
+details.theory summary{cursor:pointer;color:var(--accent)}
+details.theory p,details.theory li{font-size:13px;color:#cfd8e3}
+.msg{font-size:12px;border-radius:6px;padding:6px 8px;margin-top:6px;background:#1a2233;border:1px solid var(--border)}
+.msg.err{border-color:var(--bad);color:#ffb3b3}
+.msg.warn{border-color:var(--warn);color:#ffd9a3}
+.readout{font-size:12px;color:var(--muted);padding:0 4px;min-height:18px}
+#selftest-out{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:10px;margin-top:12px}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Field &amp; Signal Playground <small>EM boundary &amp; biquad lab</small></h1>
+  <div class="tabs" role="tablist" aria-label="Modules">
+    <button role="tab" id="tab-em" aria-selected="true" aria-controls="panel-em" tabindex="0">EM Wave &amp; Boundary</button>
+    <button role="tab" id="tab-dsp" aria-selected="false" aria-controls="panel-dsp" tabindex="-1">DSP &amp; Biquad Lab</button>
+  </div>
+</header>
+<main>
+<!-- ================= MODULE 1 ================= -->
+<section id="panel-em" role="tabpanel" aria-labelledby="tab-em">
+<div class="layout">
+<aside class="controls">
+  <fieldset><legend>Incidence</legend>
+    <div class="ctl"><label for="em-theta">θi (°)</label><input id="em-theta" type="range" min="0" max="89" step="0.1" value="45"><input id="em-theta-n" class="num" type="number" min="0" max="89" step="0.1" value="45" aria-label="Angle of incidence in degrees"></div>
+    <div class="ctl"><span>Polarization</span><div class="seg" role="group" aria-label="Polarization"><button class="seg-btn" id="em-pol-te" aria-pressed="true">TE (s)</button><button class="seg-btn" id="em-pol-tm" aria-pressed="false">TM (p)</button></div><span></span></div>
+    <div class="ctl"><label for="em-freq">f</label><input id="em-freq" type="range" min="6" max="12" step="0.01" value="9"><output id="em-freq-o" for="em-freq"></output></div>
+    <div class="note">Free-space wavelength λ0 = <span id="em-lambda0" class="mono"></span></div>
+  </fieldset>
+  <fieldset><legend>Medium 1 (z &lt; 0)</legend>
+    <div class="row"><label>εr1 <input id="em-er1" type="number" min="1" step="0.01" value="1"></label><label>μr1 <input id="em-mr1" type="number" min="1" step="0.01" value="1"></label></div>
+    <div class="row"><label>σ1 (S/m) <input id="em-s1" type="number" min="0" step="any" value="0"></label><span class="note">n1 = <span id="em-n1" class="mono"></span></span></div>
+  </fieldset>
+  <fieldset><legend>Medium 2 (z &gt; 0)</legend>
+    <div class="row"><label>εr2 <input id="em-er2" type="number" min="1" step="0.01" value="2.25"></label><label>μr2 <input id="em-mr2" type="number" min="1" step="0.01" value="1"></label></div>
+    <div class="row"><label>σ2 (S/m) <input id="em-s2" type="number" min="0" step="any" value="0"></label><span class="note">n2 = <span id="em-n2" class="mono"></span></span></div>
+  </fieldset>
+  <fieldset><legend>Presets</legend>
+    <div class="seg" id="em-presets">
+      <button class="seg-btn" data-preset="airglass">Air → Glass</button>
+      <button class="seg-btn" data-preset="glassair">Glass → Air (TIR)</button>
+      <button class="seg-btn" data-preset="seawater">Air → Seawater</button>
+      <button class="seg-btn" data-preset="copper">Air → Copper</button>
+      <button class="seg-btn" data-preset="magnetic">Magnetic (TE Brewster)</button>
+    </div>
+  </fieldset>
+  <fieldset><legend>Display</legend>
+    <div class="ctl"><label for="em-speed">Speed</label><input id="em-speed" type="range" min="0" max="3" step="0.05" value="1"><button class="btn" id="em-play" aria-pressed="true">Pause</button></div>
+    <div class="ctl"><label for="em-quality">Quality</label><select id="em-quality"><option value="160">Low (160 px)</option><option value="240" selected>Medium (240 px)</option><option value="360">High (360 px)</option><option value="540">Ultra (540 px)</option></select><span></span></div>
+    <div class="ctl"><label for="em-arrows">S arrows</label><select id="em-arrows"><option value="inst">Instantaneous S(t)</option><option value="avg">Time-averaged ⟨S⟩</option><option value="off">Off</option></select><span></span></div>
+    <div class="ctl"><label for="em-field">Field</label><select id="em-field"><option value="A">Ey (TE) / Hy (TM)</option><option value="E">|E| from Ex, Ez (TM only)</option></select><span></span></div>
+    <div class="ctl"><label for="em-span">View (λ0)</label><input id="em-span" type="range" min="8" max="14" step="0.5" value="10"><output id="em-span-o"></output></div>
+    <div class="note">Drag on the canvas (above the interface) to set θi.</div>
+  </fieldset>
+</aside>
+<div class="stage">
+  <div class="canvas-wrap"><canvas id="em-canvas" aria-label="Field heat map with rays and Poynting arrows"></canvas></div>
+  <div class="hud" id="em-hud" aria-live="off"></div>
+  <div class="canvas-wrap"><canvas id="em-rt" aria-label="R and T versus angle of incidence"></canvas></div>
+  <details class="theory"><summary>Theory &amp; conventions</summary>
+    <ul>
+      <li>Time dependence e<sup>jωt</sup>; fields E = Re{Ê e<sup>jωt</sup>}; a wave travelling in +z goes as e<sup>−jkz</sup>.</li>
+      <li>Interface at z = 0; medium 1 in z &lt; 0 (top), medium 2 in z &gt; 0 (bottom); plane of incidence x–z. TE (s): E along y. TM (p): H along y.</li>
+      <li>ε<sub>c</sub> = ε0εr − jσ/ω, η = √(μ/ε<sub>c</sub>), n<sub>c</sub> = √(μr ε<sub>c</sub>/ε0). Displayed n = √(μr εr) is read-only (lossless value), with the complex n<sub>c</sub> beside it when σ &gt; 0.</li>
+      <li>Snell: n<sub>c1</sub> sinθi = n<sub>c2</sub> sinθt; k<sub>z2</sub> = √(k2² − kx²) with the branch Im(k<sub>z2</sub>) ≤ 0 so the transmitted wave decays into medium 2; this yields the evanescent wave for θi &gt; θc. cosθt = k<sub>z2</sub>/k2 (complex in general).</li>
+      <li>TE: r = (η2 cosθi − η1 cosθt)/(η2 cosθi + η1 cosθt), t = 2η2 cosθi/(η2 cosθi + η1 cosθt).<br>
+          TM: r = (η2 cosθt − η1 cosθi)/(η2 cosθt + η1 cosθi), t = 2η2 cosθi/(η2 cosθt + η1 cosθi).<br>
+          <b>Sign convention for TM:</b> r<sub>TM</sub> is the ratio of the <i>tangential</i> E amplitudes (E<sub>x,ref</sub>/E<sub>x,inc</sub>), so at normal incidence r<sub>TM</sub> = r<sub>TE</sub> = (η2−η1)/(η2+η1). The H-field reflection coefficient is r<sub>H</sub> = −r<sub>TM</sub> and t<sub>H</sub> = 1 + r<sub>H</sub>; t<sub>TM</sub> = η2 t<sub>H</sub>/η1 is the ratio of total E amplitudes. This is the negative of the Hecht/Born–Wolf r<sub>p</sub>. The phase readout uses this same r.</li>
+      <li>Power: R = |r|²; T = Re(S<sub>z,trans</sub>)/Re(S<sub>z,inc</sub>) with ⟨S⟩ = ½Re(Ê×Ĥ*) evaluated from the complex fields at the interface (never |t|²). For lossless medium 1 the incident/reflected interference term carries no normal flux, so R + T = 1 exactly, also when medium 2 is lossy or the transmitted wave is evanescent (then T = 0).</li>
+      <li>Critical angle θc = asin(n2/n1), lossless media with n1 &gt; n2 only. Brewster angle from r = 0 in the impedance form: sin²θ<sub>B,TM</sub> = (μ1/ε1 − μ2/ε2)/(μ1/ε1 − μ1ε1/ε2²), sin²θ<sub>B,TE</sub> = (μ2/ε2 − μ1/ε1)/(μ2/ε2 − μ1²/(μ2ε2)); each candidate is verified numerically (|r| &lt; 10⁻⁶). For lossy media the pseudo-Brewster angle (minimum of |r<sub>TM</sub>|) is found by a golden-section search.</li>
+      <li>Evanescent / attenuated transmitted wave: decay length δ = 1/|Im k<sub>z2</sub>|, shown in the HUD and as dashed envelope lines at δ, 2δ, 3δ.</li>
+      <li>The canvas uses a normalized free-space wavelength (λ0 = 1 unit, 8–14 wavelengths across the view); the physical λ0 = c/f appears in the HUD. Material loss uses the physical ω through σ/(ωε0).</li>
+      <li>Heat map: TE shows Ey, TM shows Hy (or the instantaneous |E| from Ex, Ez). Arrows: instantaneous S = E(t)×H(t) from the real fields (interference cross-terms included) or ⟨S⟩ = ½Re(E×H*).</li>
+    </ul>
+  </details>
+</div>
+</div>
+</section>
+<!-- ================= MODULE 2 ================= -->
+<section id="panel-dsp" role="tabpanel" aria-labelledby="tab-dsp" hidden>
+<div class="layout">
+<aside class="controls">
+  <fieldset><legend>Filter</legend>
+    <div class="row"><div class="seg" id="dsp-types" role="group" aria-label="Filter type">
+      <button class="seg-btn active" data-type="lp">Lowpass</button><button class="seg-btn" data-type="hp">Highpass</button><button class="seg-btn" data-type="bp">Bandpass</button><button class="seg-btn" data-type="notch">Notch</button><button class="seg-btn" data-type="peak">Peaking</button>
+    </div><span class="badge warn" id="dsp-custom" hidden>Custom (edited roots)</span></div>
+    <div class="ctl"><label for="dsp-fc">fc</label><input id="dsp-fc" type="range" min="1" max="4.371" step="0.001" value="3"><input id="dsp-fc-n" class="num" type="number" min="10" step="any" value="1000" aria-label="Cutoff frequency in Hz"></div>
+    <div class="ctl"><label for="dsp-fs">fs</label><select id="dsp-fs"><option>8000</option><option>16000</option><option>22050</option><option>44100</option><option selected>48000</option><option>96000</option></select><span class="note" id="dsp-fs-note"></span></div>
+    <div class="ctl"><label for="dsp-q">Q</label><input id="dsp-q" type="range" min="0.1" max="20" step="0.01" value="0.7071"><input id="dsp-q-n" class="num" type="number" min="0.1" max="20" step="0.0001" value="0.7071" aria-label="Q"></div>
+    <div class="ctl"><label for="dsp-gain">Gain dB</label><input id="dsp-gain" type="range" min="-24" max="24" step="0.1" value="0"><input id="dsp-gain-n" class="num" type="number" min="-24" max="24" step="0.1" value="0" aria-label="Peaking gain in dB"></div>
+    <div class="ctl"><label for="dsp-n">N (h[n])</label><input id="dsp-n" type="range" min="16" max="1024" step="1" value="128"><output id="dsp-n-o">128</output></div>
+    <div class="row"><label><input type="checkbox" id="dsp-autorange"> Auto-range magnitude</label></div>
+  </fieldset>
+  <fieldset><legend>Coefficients (a0 normalized to 1)</legend>
+    <pre id="dsp-coefs"></pre>
+    <div class="row"><span class="badge ok" id="dsp-stable">STABLE</span><span class="note" id="dsp-poles-note"></span></div>
+  </fieldset>
+  <fieldset><legend>Pole–zero editor</legend>
+    <div class="row"><label><input type="checkbox" id="dsp-normgain" checked> Normalize gain (hold |H| at reference frequency)</label></div>
+    <div class="note">Drag × (poles) or ○ (zeros). Conjugate pairs move together; roots on the real axis slide along it; a pair merges into two real roots when it reaches the axis and splits back when lifted. |pole| ≤ 0.9999, |zero| ≤ 3. Click a root then use arrow keys (Shift = larger step).</div>
+    <div class="note" id="dsp-sel-note">Selected: none</div>
+  </fieldset>
+  <fieldset><legend>Audio</legend>
+    <div class="row"><button class="btn primary" id="au-start">Start audio</button><button class="btn" id="au-stop" disabled>Stop</button><span class="badge" id="au-state">no context</span></div>
+    <div class="ctl"><label for="au-source">Source</label><select id="au-source"><option value="white">White noise</option><option value="pink">Pink noise</option><option value="sweep">Log sweep 20 Hz → 20 kHz</option><option value="mic">Microphone</option></select><span></span></div>
+    <div class="ctl"><label for="au-sweep">Sweep s</label><input id="au-sweep" type="range" min="2" max="20" step="0.5" value="6"><output id="au-sweep-o">6 s</output></div>
+    <div class="ctl"><label for="au-master">Master</label><input id="au-master" type="range" min="0" max="1" step="0.01" value="0.2"><output id="au-master-o">0.20</output></div>
+    <div class="row"><button class="btn" id="au-bypass" aria-pressed="false">Bypass: off (filter active)</button><label><input type="checkbox" id="au-showh" checked> Overlay |H|</label></div>
+    <div id="au-msgs"></div>
+  </fieldset>
+</aside>
+<div class="stage">
+  <div class="grid2">
+    <div class="canvas-wrap"><canvas id="dsp-zplane" tabindex="0" aria-label="Interactive z-plane pole-zero editor"></canvas></div>
+    <div class="stage">
+      <div class="canvas-wrap"><canvas id="dsp-mag" aria-label="Magnitude response"></canvas></div>
+      <div class="canvas-wrap"><canvas id="dsp-phase" aria-label="Phase response"></canvas></div>
+      <div class="readout mono" id="dsp-cursor">Hover or touch the Bode plots for a readout.</div>
+    </div>
+  </div>
+  <div class="canvas-wrap"><canvas id="dsp-impulse" aria-label="Impulse response stem plot"></canvas></div>
+  <div class="canvas-wrap"><canvas id="dsp-spectrum" aria-label="Spectrum analyzer"></canvas></div>
+</div>
+</div>
+</section>
+<pre id="selftest-out" hidden></pre>
+<script>
+/* ===================== CORE (pure math, no DOM) ===================== */
+'use strict';
+class Complex {
+  constructor(re, im) { this.re = re; this.im = im === undefined ? 0 : im; }
+  add(b) { return new Complex(this.re + b.re, this.im + b.im); }
+  sub(b) { return new Complex(this.re - b.re, this.im - b.im); }
+  mul(b) { return new Complex(this.re * b.re - this.im * b.im, this.re * b.im + this.im * b.re); }
+  div(b) { const d = b.re * b.re + b.im * b.im; return new Complex((this.re * b.re + this.im * b.im) / d, (this.im * b.re - this.re * b.im) / d); }
+  scale(s) { return new Complex(this.re * s, this.im * s); }
+  neg() { return new Complex(-this.re, -this.im); }
+  conj() { return new Complex(this.re, -this.im); }
+  abs() { return Math.hypot(this.re, this.im); }
+  abs2() { return this.re * this.re + this.im * this.im; }
+  arg() { return Math.atan2(this.im, this.re); }
+  sqrt() { // principal branch, Re >= 0, numerically stable
+    const r = this.abs();
+    if (r === 0) return new Complex(0, 0);
+    if (this.re >= 0) { const t = Math.sqrt(0.5 * (r + this.re)); return new Complex(t, this.im / (2 * t)); }
+    const t = Math.sqrt(0.5 * (r - this.re));
+    const s = this.im < 0 ? -t : t;
+    return new Complex(this.im / (2 * s), s);
+  }
+  exp() { const e = Math.exp(this.re); return new Complex(e * Math.cos(this.im), e * Math.sin(this.im)); }
+  isFinite() { return Number.isFinite(this.re) && Number.isFinite(this.im); }
+}
+const C = (re, im) => new Complex(re, im || 0);
+const reMulConj = (a, b) => a.re * b.re + a.im * b.im;          // Re(a b*)
+const instVal = (a, phi) => a.re * Math.cos(phi) - a.im * Math.sin(phi); // Re(a e^{jφ})
+
+/* ---------- EM: media and interface ---------- */
+const PHYS = { EPS0: 8.8541878128e-12, MU0: 1.25663706212e-6, C0: 299792458 };
+PHYS.ETA0 = Math.sqrt(PHYS.MU0 / PHYS.EPS0);
+
+function makeMedium(er, mr, sigma, freq) {
+  const omega = 2 * Math.PI * freq;
+  const ecRel = C(er, -sigma / (omega * PHYS.EPS0));       // ε_c / ε0 = εr − jσ/(ωε0)
+  const nc = C(mr * ecRel.re, mr * ecRel.im).sqrt();        // √(μr ε_c/ε0), Im ≤ 0
+  const eta = C(mr, 0).div(ecRel).sqrt().scale(PHYS.ETA0);  // √(μ/ε_c), Re ≥ 0
+  const Y = C(1, 0).div(eta);
+  return { er, mr, sigma, freq, omega, ecRel, nc, eta, Y, nReal: Math.sqrt(Math.max(0, er * mr)), lossy: sigma > 0 };
+}
+
+function solveInterface(thetaDeg, pol, m1, m2) {
+  const th = thetaDeg * Math.PI / 180;
+  const si = Math.sin(th), ci = Math.cos(th);
+  const k0 = 2 * Math.PI;                                    // normalized λ0 = 1
+  const k1 = m1.nc.scale(k0), k2 = m2.nc.scale(k0);
+  const kx = k1.scale(si), kz1 = k1.scale(ci);
+  let kz2 = k2.mul(k2).sub(kx.mul(kx)).sqrt();
+  if (kz2.im > 0 || (kz2.im === 0 && kz2.re < 0)) kz2 = kz2.neg(); // decaying / forward branch
+  const cosI = C(ci, 0), sinI = C(si, 0);
+  const cosT = kz2.div(k2), sinT = kx.div(k2);
+  const eta1 = m1.eta, eta2 = m2.eta;
+  let r, t, den;
+  if (pol === 'TE') {
+    den = eta2.mul(cosI).add(eta1.mul(cosT));
+    r = eta2.mul(cosI).sub(eta1.mul(cosT)).div(den);
+    t = eta2.mul(cosI).scale(2).div(den);
+  } else {
+    den = eta2.mul(cosT).add(eta1.mul(cosI));
+    r = eta2.mul(cosT).sub(eta1.mul(cosI)).div(den);
+    t = eta2.mul(cosI).scale(2).div(den);
+  }
+  if (!(den.abs() > 1e-300) || !r.isFinite() || !t.isFinite()) { r = C(NaN, NaN); t = C(NaN, NaN); }
+  const evanescent = !m1.lossy && !m2.lossy && Math.abs(kz2.re) <= 1e-9 * (kz2.abs() + 1e-300) && kz2.im < 0;
+  return { thetaDeg, pol, m1, m2, k1, k2, kx, kz1, kz2, cosI, sinI, cosT, sinT, r, t, evanescent };
+}
+
+// exp(-j (kx x + sign kz z)) with growth clamped (never NaN/Inf)
+function waveFactor(kx, kz, x, z, sign) {
+  const pr = kx.re * x + sign * kz.re * z, pi = kx.im * x + sign * kz.im * z;
+  const mag = Math.exp(Math.min(40, pi));
+  return new Complex(mag * Math.cos(-pr), mag * Math.sin(-pr));
+}
+
+// Phasor components at (x, z): TE → {A:Ey, B:Hx, D:Hz}; TM → {A:Hy, B:Ex, D:Ez}
+function fieldPhasors(sol, x, z, part) {
+  const { pol, kx, kz1, kz2, r, t, m1, m2, cosI, sinI, cosT, sinT } = sol;
+  let A = C(0), B = C(0), D = C(0);
+  const inc = part === 'inc' || (part === 'total' && z < 0);
+  const ref = part === 'ref' || (part === 'total' && z < 0);
+  const tr = part === 'tr' || (part === 'total' && z >= 0);
+  if (pol === 'TE') {
+    const cY1 = cosI.mul(m1.Y), sY1 = sinI.mul(m1.Y), cY2 = cosT.mul(m2.Y), sY2 = sinT.mul(m2.Y);
+    if (inc) { const e = waveFactor(kx, kz1, x, z, +1); A = A.add(e); B = B.sub(cY1.mul(e)); D = D.add(sY1.mul(e)); }
+    if (ref) { const e = waveFactor(kx, kz1, x, z, -1).mul(r); A = A.add(e); B = B.add(cY1.mul(e)); D = D.add(sY1.mul(e)); }
+    if (tr) { const e = waveFactor(kx, kz2, x, z, +1).mul(t); A = A.add(e); B = B.sub(cY2.mul(e)); D = D.add(sY2.mul(e)); }
+  } else {
+    const H0 = m1.Y, rH = r.neg(), tH = C(1).add(rH);
+    const e1c = m1.eta.mul(cosI), e1s = m1.eta.mul(sinI), e2c = m2.eta.mul(cosT), e2s = m2.eta.mul(sinT);
+    if (inc) { const h = waveFactor(kx, kz1, x, z, +1).mul(H0); A = A.add(h); B = B.add(e1c.mul(h)); D = D.sub(e1s.mul(h)); }
+    if (ref) { const h = waveFactor(kx, kz1, x, z, -1).mul(H0).mul(rH); A = A.add(h); B = B.sub(e1c.mul(h)); D = D.sub(e1s.mul(h)); }
+    if (tr) { const h = waveFactor(kx, kz2, x, z, +1).mul(H0).mul(tH); A = A.add(h); B = B.add(e2c.mul(h)); D = D.sub(e2s.mul(h)); }
+  }
+  return { A, B, D };
+}
+function poyntingAvg(pol, F) { // ½ Re(E × H*)
+  if (pol === 'TE') return { x: 0.5 * reMulConj(F.A, F.D), z: -0.5 * reMulConj(F.A, F.B) };
+  return { x: -0.5 * reMulConj(F.D, F.A), z: 0.5 * reMulConj(F.B, F.A) };
+}
+function poyntingInst(pol, F, phi) { // E(t) × H(t) from real instantaneous fields
+  const a = instVal(F.A, phi), b = instVal(F.B, phi), d = instVal(F.D, phi);
+  if (pol === 'TE') return { x: a * d, z: -a * b };
+  return { x: -d * a, z: b * a };
+}
+
+function criticalAngle(m1, m2) {
+  if (m1.lossy || m2.lossy || !(m1.nReal > m2.nReal)) return null;
+  return Math.asin(m2.nReal / m1.nReal) * 180 / Math.PI;
+}
+function brewsterAnalytic(pol, m1, m2) {
+  if (m1.lossy || m2.lossy) return null;
+  const e1 = m1.er, u1 = m1.mr, e2 = m2.er, u2 = m2.mr;
+  let num, den;
+  if (pol === 'TM') { num = u1 / e1 - u2 / e2; den = u1 / e1 - u1 * e1 / (e2 * e2); }
+  else { num = u2 / e2 - u1 / e1; den = u2 / e2 - u1 * u1 / (u2 * e2); }
+  if (!(Math.abs(den) > 1e-15)) return null;
+  const s2 = num / den;
+  if (!(s2 >= 0 && s2 < 1)) return null;
+  const th = Math.asin(Math.sqrt(s2)) * 180 / Math.PI;
+  const sol = solveInterface(th, pol, m1, m2);            // verify numerically
+  if (!sol.r.isFinite() || sol.r.abs() > 1e-6) return null;
+  return th;
+}
+function pseudoBrewster(m1, m2) {
+  const f = th => { const s = solveInterface(th, 'TM', m1, m2); return s.r.isFinite() ? s.r.abs() : Infinity; };
+  let best = 0, bestV = Infinity;
+  for (let th = 0; th <= 89; th += 0.5) { const v = f(th); if (v < bestV) { bestV = v; best = th; } }
+  let a = Math.max(0, best - 0.5), b = Math.min(89, best + 0.5);
+  const g = (Math.sqrt(5) - 1) / 2;
+  let x1 = b - g * (b - a), x2 = a + g * (b - a), f1 = f(x1), f2 = f(x2);
+  for (let i = 0; i < 80; i++) {
+    if (f1 < f2) { b = x2; x2 = x1; f2 = f1; x1 = b - g * (b - a); f1 = f(x1); }
+    else { a = x1; x1 = x2; f1 = f2; x2 = a + g * (b - a); f2 = f(x2); }
+  }
+  const th = 0.5 * (a + b);
+  return { theta: th, rmin: f(th) };
+}
+
+function emAnalyze(thetaDeg, pol, m1, m2) {
+  const sol = solveInterface(thetaDeg, pol, m1, m2);
+  const R = sol.r.isFinite() ? sol.r.abs2() : NaN;
+  const inc = fieldPhasors(sol, 0, 0, 'inc'), tr = fieldPhasors(sol, 0, 0, 'tr');
+  const SzInc = poyntingAvg(pol, inc).z, SzTr = poyntingAvg(pol, tr).z;
+  let T = (Number.isFinite(SzInc) && Math.abs(SzInc) > 1e-300 && Number.isFinite(SzTr)) ? SzTr / SzInc : NaN;
+  if (Number.isFinite(T) && Math.abs(T) < 1e-15) T = 0;
+  const sum = R + T;
+  const lossless = !m1.lossy && !m2.lossy;
+  const conserv = m1.lossy ? 'na' : (Number.isFinite(sum) && Math.abs(sum - 1) <= 1e-9 ? 'pass' : 'fail');
+  const phaseDeg = sol.r.isFinite() ? argDeg(sol.r) : NaN;
+  const delta = sol.kz2.im < -1e-12 ? 1 / (-sol.kz2.im) : Infinity;    // in λ0 units
+  const lambda0 = PHYS.C0 / m1.freq;
+  const thetaT = sol.evanescent ? null : Math.atan2(sol.kx.re, sol.kz2.re) * 180 / Math.PI;
+  let brewster;
+  if (lossless) brewster = { kind: 'exact', tm: brewsterAnalytic('TM', m1, m2), te: brewsterAnalytic('TE', m1, m2) };
+  else { const p = pseudoBrewster(m1, m2); brewster = { kind: 'pseudo', tm: p.theta, rmin: p.rmin, te: null, label: 'pseudo-Brewster (min |r_TM|)' }; }
+  return { sol, r: sol.r, t: sol.t, R, T, sum, conserv, phaseDeg, delta, deltaPhys: delta * lambda0, lambda0, thetaT,
+           evanescent: sol.evanescent, thetaC: criticalAngle(m1, m2), brewster, lossless };
+}
+function argDeg(c) { let d = Math.atan2(c.im, c.re) * 180 / Math.PI; if (d <= -180 + 1e-7) d = 180; return d; }
+
+// Field cache for the heat map: iw×ih internal pixels, `span` wavelengths across, aspect = h/w
+function buildFieldCache(sol, iw, ih, span, aspect) {
+  const n = iw * ih;
+  const Are = new Float32Array(n), Aim = new Float32Array(n), Bre = new Float32Array(n), Bim = new Float32Array(n), Dre = new Float32Array(n), Dim = new Float32Array(n);
+  const { kx, kz1, kz2, pol, r, t, m1, m2, cosI, sinI, cosT, sinT } = sol;
+  const exr = new Float64Array(iw), exi = new Float64Array(iw);
+  for (let i = 0; i < iw; i++) {
+    const x = ((i + 0.5) / iw - 0.5) * span;
+    const pr = kx.re * x, mg = Math.exp(Math.min(40, kx.im * x));
+    exr[i] = mg * Math.cos(-pr); exi[i] = mg * Math.sin(-pr);
+  }
+  let MI, MR, MT, KB, KD, KB2, KD2;
+  if (pol === 'TE') {
+    MI = C(1); MR = r; MT = t;
+    KB = cosI.mul(m1.Y).neg(); KD = sinI.mul(m1.Y); KB2 = cosT.mul(m2.Y).neg(); KD2 = sinT.mul(m2.Y);
+  } else {
+    const H0 = m1.Y, rH = r.neg(), tH = C(1).add(rH);
+    MI = H0; MR = H0.mul(rH); MT = H0.mul(tH);
+    KB = m1.eta.mul(cosI); KD = m1.eta.mul(sinI).neg(); KB2 = m2.eta.mul(cosT); KD2 = m2.eta.mul(sinT).neg();
+  }
+  let vmaxA = 0, vmaxE = 0;
+  for (let j = 0; j < ih; j++) {
+    const z = ((j + 0.5) / ih - 0.5) * span * aspect;
+    const row = j * iw;
+    if (z < 0) {
+      const pr = kz1.re * z, pi = kz1.im * z;
+      const mI = Math.exp(Math.min(40, pi)), mR = Math.exp(Math.min(40, -pi));
+      let fIr = mI * Math.cos(-pr), fIi = mI * Math.sin(-pr), fRr = mR * Math.cos(pr), fRi = mR * Math.sin(pr);
+      let a = fIr * MI.re - fIi * MI.im, b = fIr * MI.im + fIi * MI.re; fIr = a; fIi = b;
+      a = fRr * MR.re - fRi * MR.im; b = fRr * MR.im + fRi * MR.re; fRr = a; fRi = b;
+      for (let i = 0; i < iw; i++) {
+        const er = exr[i], ei = exi[i];
+        const ur = er * fIr - ei * fIi, ui = er * fIi + ei * fIr;
+        const vr = er * fRr - ei * fRi, vi = er * fRi + ei * fRr;
+        const sr = ur + vr, si = ui + vi, dr = ur - vr, di = ui - vi;
+        const k = row + i;
+        Are[k] = sr; Aim[k] = si;
+        Bre[k] = KB.re * dr - KB.im * di; Bim[k] = KB.re * di + KB.im * dr;
+        Dre[k] = KD.re * sr - KD.im * si; Dim[k] = KD.re * si + KD.im * sr;
+      }
+    } else {
+      const pr = kz2.re * z, mT = Math.exp(Math.min(40, kz2.im * z));
+      let fTr = mT * Math.cos(-pr), fTi = mT * Math.sin(-pr);
+      const a = fTr * MT.re - fTi * MT.im, b = fTr * MT.im + fTi * MT.re; fTr = a; fTi = b;
+      for (let i = 0; i < iw; i++) {
+        const er = exr[i], ei = exi[i];
+        const hr = er * fTr - ei * fTi, hi = er * fTi + ei * fTr;
+        const k = row + i;
+        Are[k] = hr; Aim[k] = hi;
+        Bre[k] = KB2.re * hr - KB2.im * hi; Bim[k] = KB2.re * hi + KB2.im * hr;
+        Dre[k] = KD2.re * hr - KD2.im * hi; Dim[k] = KD2.re * hi + KD2.im * hr;
+      }
+    }
+  }
+  for (let k = 0; k < n; k++) {
+    if (!Number.isFinite(Are[k]) || !Number.isFinite(Aim[k])) { Are[k] = 0; Aim[k] = 0; }
+    if (!Number.isFinite(Bre[k]) || !Number.isFinite(Bim[k])) { Bre[k] = 0; Bim[k] = 0; }
+    if (!Number.isFinite(Dre[k]) || !Number.isFinite(Dim[k])) { Dre[k] = 0; Dim[k] = 0; }
+    const ma = Math.hypot(Are[k], Aim[k]); if (ma > vmaxA) vmaxA = ma;
+    const me = Math.sqrt(Bre[k] * Bre[k] + Bim[k] * Bim[k] + Dre[k] * Dre[k] + Dim[k] * Dim[k]); if (me > vmaxE) vmaxE = me;
+  }
+  return { iw, ih, span, aspect, pol, Are, Aim, Bre, Bim, Dre, Dim, vmaxA: vmaxA || 1, vmaxE: vmaxE || 1 };
+}
+/* ---------- DSP: biquad core shared by the UI and the AudioWorklet ---------- */
+const BIQUAD_CORE_SRC = `
+function df2tStep(xn, c, st) {
+  // Direct Form II Transposed; c = [b0, b1, b2, a1, a2], st = [s1, s2]
+  const yn = c[0] * xn + st[0];
+  st[0] = c[1] * xn - c[3] * yn + st[1];
+  st[1] = c[2] * xn - c[4] * yn;
+  return yn;
+}
+function df2tProcess(x, y, n, c, st) {
+  for (let i = 0; i < n; i++) y[i] = df2tStep(x[i], c, st);
+}`;
+const DF2T = new Function(BIQUAD_CORE_SRC + '\nreturn { df2tStep, df2tProcess };')();
+const WORKLET_SRC = BIQUAD_CORE_SRC + `
+class BiquadDF2TProcessor extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this.cur = new Float64Array([1, 0, 0, 0, 0]);
+    this.target = new Float64Array([1, 0, 0, 0, 0]);
+    this.delta = new Float64Array(5);
+    this.rampLeft = 0;
+    this.states = [];
+    this.port.onmessage = (e) => {
+      const d = e.data;
+      if (d && d.type === 'coefs') {
+        const n = Math.max(1, Math.round(sampleRate * 0.005)); // 5 ms linear ramp
+        for (let i = 0; i < 5; i++) { this.target[i] = d.c[i]; this.delta[i] = (d.c[i] - this.cur[i]) / n; }
+        this.rampLeft = n;
+      } else if (d && d.type === 'reset') {
+        for (const s of this.states) { s[0] = 0; s[1] = 0; }
+      }
+    };
+  }
+  process(inputs, outputs) {
+    const inp = inputs[0], out = outputs[0];
+    const nOut = out.length, nIn = inp ? inp.length : 0;
+    const n = nOut ? out[0].length : 128;
+    for (let ch = 0; ch < nOut; ch++) if (!this.states[ch]) this.states[ch] = new Float64Array(2);
+    const cur = this.cur;
+    for (let i = 0; i < n; i++) {
+      if (this.rampLeft > 0) {
+        for (let k = 0; k < 5; k++) cur[k] += this.delta[k];
+        if (--this.rampLeft === 0) for (let k = 0; k < 5; k++) cur[k] = this.target[k];
+      }
+      for (let ch = 0; ch < nOut; ch++) {
+        const xn = nIn ? inp[Math.min(ch, nIn - 1)][i] : 0;
+        out[ch][i] = df2tStep(xn, cur, this.states[ch]);
+      }
+    }
+    for (let ch = 0; ch < nOut; ch++) { const s = this.states[ch]; if (Math.abs(s[0]) < 1e-20) s[0] = 0; if (Math.abs(s[1]) < 1e-20) s[1] = 0; }
+    return true;
+  }
+}
+registerProcessor('biquad-df2t', BiquadDF2TProcessor);`;
+
+const FILTER_NAMES = { lp: 'Lowpass', hp: 'Highpass', bp: 'Bandpass (0 dB peak)', notch: 'Notch', peak: 'Peaking EQ' };
+function rbjCoefs(type, fc, fs, Q, gainDb) {
+  const w0 = 2 * Math.PI * fc / fs, cw = Math.cos(w0), sw = Math.sin(w0);
+  const alpha = sw / (2 * Q), A = Math.pow(10, gainDb / 40);
+  let b0, b1, b2, a0, a1, a2;
+  switch (type) {
+    case 'lp': b0 = (1 - cw) / 2; b1 = 1 - cw; b2 = (1 - cw) / 2; a0 = 1 + alpha; a1 = -2 * cw; a2 = 1 - alpha; break;
+    case 'hp': b0 = (1 + cw) / 2; b1 = -(1 + cw); b2 = (1 + cw) / 2; a0 = 1 + alpha; a1 = -2 * cw; a2 = 1 - alpha; break;
+    case 'bp': b0 = alpha; b1 = 0; b2 = -alpha; a0 = 1 + alpha; a1 = -2 * cw; a2 = 1 - alpha; break;
+    case 'notch': b0 = 1; b1 = -2 * cw; b2 = 1; a0 = 1 + alpha; a1 = -2 * cw; a2 = 1 - alpha; break;
+    case 'peak': b0 = 1 + alpha * A; b1 = -2 * cw; b2 = 1 - alpha * A; a0 = 1 + alpha / A; a1 = -2 * cw; a2 = 1 - alpha / A; break;
+    default: throw new Error('unknown filter type ' + type);
+  }
+  return { b0: b0 / a0, b1: b1 / a0, b2: b2 / a0, a0: 1, a1: a1 / a0, a2: a2 / a0, a0raw: a0 };
+}
+function coefArray(c) { return [c.b0, c.b1, c.b2, c.a1, c.a2]; }
+function freqResponseAt(c, w) { // H(e^{jw}) as Complex
+  const c1 = Math.cos(w), s1 = Math.sin(w), c2 = Math.cos(2 * w), s2 = Math.sin(2 * w);
+  const num = C(c.b0 + c.b1 * c1 + c.b2 * c2, -(c.b1 * s1 + c.b2 * s2));
+  const den = C(1 + c.a1 * c1 + c.a2 * c2, -(c.a1 * s1 + c.a2 * s2));
+  return num.div(den);
+}
+function magDb(h) { return 20 * Math.log10(Math.max(h.abs(), 1e-6)); } // floor −120 dB
+function freqResponse(c, fs, nPts, fmin) {
+  nPts = nPts || 1024; fmin = fmin || 20;
+  const fmax = fs / 2, freqs = new Float64Array(nPts), mag = new Float64Array(nPts), phase = new Float64Array(nPts);
+  let prev = 0, acc = 0;
+  for (let i = 0; i < nPts; i++) {
+    const f = fmin * Math.pow(fmax / fmin, i / (nPts - 1));
+    const h = freqResponseAt(c, 2 * Math.PI * f / fs);
+    freqs[i] = f; mag[i] = magDb(h);
+    const p = h.abs() < 1e-12 ? prev : h.arg(); // exact zeros (e.g. LP at Nyquist) carry the previous phase
+    if (i > 0) { let d = p - prev; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI; acc += d; } else acc = p;
+    prev = p; phase[i] = acc * 180 / Math.PI;
+  }
+  return { freqs, mag, phase, fmin, fmax };
+}
+function quadRoots(a, b, c) { // a z² + b z + c = 0
+  const tiny = 1e-300;
+  if (Math.abs(a) < tiny) {
+    if (Math.abs(b) < tiny) return { roots: [], note: 'constant numerator' };
+    return { roots: [C(-c / b, 0)], note: 'one finite root (leading coefficient is 0)' };
+  }
+  const disc = b * b - 4 * a * c, scale = b * b + Math.abs(4 * a * c);
+  if (Math.abs(disc) <= 1e-12 * scale) { const x = -b / (2 * a); return { roots: [C(x, 0), C(x, 0)], double: true }; }
+  if (disc > 0) {
+    const q = -0.5 * (b + Math.sign(b || 1) * Math.sqrt(disc));
+    const r1 = q / a, r2 = Math.abs(q) > tiny ? c / q : 0;
+    return { roots: [C(r1, 0), C(r2, 0)] };
+  }
+  const re = -b / (2 * a), im = Math.sqrt(-disc) / (2 * Math.abs(a));
+  return { roots: [C(re, im), C(re, -im)], pair: true };
+}
+function padRoots(q) { // ensure two roots for the editor (a missing zero becomes z = 0: pure delay, |H| unchanged)
+  const r = q.roots.slice(); while (r.length < 2) r.push(C(0, 0)); return r;
+}
+function rootsFromCoefs(c) {
+  const qp = quadRoots(1, c.a1, c.a2), qz = quadRoots(c.b0, c.b1, c.b2);
+  const poles = padRoots(qp), zeros = padRoots(qz);
+  const isReal = arr => arr.every(z => Math.abs(z.im) < 1e-12);
+  let K = c.b0;
+  if (Math.abs(c.b0) < 1e-300) K = Math.abs(c.b1) > 1e-300 ? c.b1 : c.b2;
+  return { poles, zeros, polesReal: isReal(poles), zerosReal: isReal(zeros), K, zeroNote: qz.note || '', poleNote: qp.note || '' };
+}
+function coefsFromRoots(roots) {
+  const [p1, p2] = roots.poles, [z1, z2] = roots.zeros, K = roots.K;
+  return { b0: K, b1: -K * (z1.re + z2.re), b2: K * z1.mul(z2).re, a0: 1, a1: -(p1.re + p2.re), a2: p1.mul(p2).re, a0raw: 1 };
+}
+function poleRadii(c) { return quadRoots(1, c.a1, c.a2).roots.map(p => p.abs()); }
+function isStable(c) { const r = poleRadii(c); return [c.b0, c.b1, c.b2, c.a1, c.a2].every(Number.isFinite) && r.length > 0 && r.every(x => x < 1); }
+const POLE_RMAX = 0.9999, ZERO_RMAX = 3;
+function clampRoot(kind, x, y) {
+  const rmax = kind === 'pole' ? POLE_RMAX : ZERO_RMAX, r = Math.hypot(x, y);
+  if (!(r <= rmax)) { if (!Number.isFinite(r) || r === 0) return [0, 0]; return [x * rmax / r, y * rmax / r]; }
+  return [x, y];
+}
+// Move root `idx` of kind 'pole'|'zero' to (x, y); enforce conjugate symmetry and real-axis rules. Mutates and returns roots.
+function applyRootMove(roots, kind, idx, x, y, snapTol) {
+  const arr = kind === 'pole' ? roots.poles : roots.zeros, flag = kind === 'pole' ? 'polesReal' : 'zerosReal';
+  let [X, Y] = clampRoot(kind, x, y);
+  if (Math.abs(Y) < snapTol) Y = 0;
+  const other = 1 - idx;
+  if (Y === 0) {
+    if (!roots[flag]) { arr[idx] = C(X, 0); arr[other] = C(X, 0); roots[flag] = true; } // pair → double real root
+    else arr[idx] = C(X, 0);                                                            // real root slides alone
+  } else { arr[idx] = C(X, Y); arr[other] = C(X, -Y); roots[flag] = false; }              // real/pair → conjugate pair
+  return roots;
+}
+function refFreqFor(type, fc, fs) { return type === 'lp' ? 0 : type === 'hp' ? fs / 2 : fc; }
+function impulseResponse(c, N) {
+  const x = new Float64Array(N), y = new Float64Array(N); x[0] = 1;
+  DF2T.df2tProcess(x, y, N, coefArray(c), new Float64Array(2));
+  return y;
+}
+function trimLength(h, eps) { let last = 0; for (let i = 0; i < h.length; i++) if (Math.abs(h[i]) >= eps) last = i; return Math.max(2, last + 1); }
+
+/* ---------- formatting ---------- */
+function fmtNum(x, d) { return Number.isFinite(x) ? x.toFixed(d === undefined ? 4 : d) : '—'; }
+function fmtDeg(x, d) { return Number.isFinite(x) ? x.toFixed(d === undefined ? 2 : d) + '°' : '—'; }
+function fmtSI(v, unit, digits) {
+  digits = digits || 3;
+  if (!Number.isFinite(v)) return '—';
+  if (v === 0) return '0 ' + unit;
+  const a = Math.abs(v), P = [[1e12, 'T'], [1e9, 'G'], [1e6, 'M'], [1e3, 'k'], [1, ''], [1e-3, 'm'], [1e-6, 'µ'], [1e-9, 'n'], [1e-12, 'p'], [1e-15, 'f']];
+  for (const [s, p] of P) if (a >= s) return (v / s).toPrecision(digits) + ' ' + p + unit;
+  return v.toExponential(2) + ' ' + unit;
+}
+function fmtPolar(c) { return c && c.isFinite() ? c.abs().toFixed(4) + ' ∠ ' + argDeg(c).toFixed(2) + '°' : '—'; }
+function fmtComplexN(c) { return c && c.isFinite() ? c.re.toFixed(3) + (c.im < 0 ? ' − j' : ' + j') + Math.abs(c.im).toFixed(3) : '—'; }
+/* ---------- acceptance self-tests (console: runSelfTests()) ---------- */
+function runSelfTests() {
+  const lines = [], results = [];
+  const check = (name, ok, detail) => { ok = !!ok; results.push({ name, ok }); const l = (ok ? 'PASS' : 'FAIL') + ' — ' + name + (detail ? '  [' + detail + ']' : ''); lines.push(l); console.log(l); };
+  const near = (a, b, tol) => Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) <= tol;
+  const rnd = (seed => () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; })(20240607);
+  const F = 1e9;
+  // 1
+  { const m1 = makeMedium(1, 1, 0, F), m2 = makeMedium(2.25, 1, 0, F);
+    const an = emAnalyze(0, 'TE', m1, m2);
+    check('EM1 Brewster n1=1,n2=1.5 ≈ 56.3099°', near(an.brewster.tm, 56.3099, 1e-3), fmtDeg(an.brewster.tm, 4));
+    check('EM1 θi=0 TE: r=−0.2, t=0.8, R=0.04, T=0.96', near(an.r.re, -0.2, 1e-9) && near(an.r.im, 0, 1e-9) && near(an.t.re, 0.8, 1e-9) && near(an.R, 0.04, 1e-9) && near(an.T, 0.96, 1e-9),
+      'r=' + fmtNum(an.r.re, 6) + ' t=' + fmtNum(an.t.re, 6) + ' R=' + fmtNum(an.R, 6) + ' T=' + fmtNum(an.T, 6)); }
+  // 2
+  { const m1 = makeMedium(2.25, 1, 0, F), m2 = makeMedium(1, 1, 0, F);
+    const an = emAnalyze(60, 'TE', m1, m2), an2 = emAnalyze(60, 'TM', m1, m2);
+    check('EM2 critical angle n1=1.5→1 ≈ 41.8103°', near(an.thetaC, 41.8103, 1e-3), fmtDeg(an.thetaC, 4));
+    check('EM2 TIR at 60°: |r|=1, T≤1e-9, δ finite (both pols)', near(an.r.abs(), 1, 1e-9) && an.T <= 1e-9 && Number.isFinite(an.delta) && an.delta > 0 && near(an2.r.abs(), 1, 1e-9) && an2.T <= 1e-9 && Number.isFinite(an2.delta),
+      '|r|=' + fmtNum(an.r.abs(), 10) + ' T=' + an.T.toExponential(2) + ' δ=' + fmtNum(an.delta, 4) + ' λ0'); }
+  // 3
+  { let worst = 0, nTir = 0, nProp = 0, ok = true;
+    for (let i = 0; i < 500; i++) {
+      const m1 = makeMedium(1 + 11 * rnd(), 1 + 4 * rnd(), 0, F), m2 = makeMedium(1 + 11 * rnd(), 1 + 4 * rnd(), 0, F);
+      const th = 89 * rnd(), pol = rnd() < 0.5 ? 'TE' : 'TM';
+      const an = emAnalyze(th, pol, m1, m2);
+      if (an.evanescent) nTir++; else nProp++;
+      const e = Math.abs(an.sum - 1); if (!(e <= 1e-9)) ok = false; if (e > worst || !Number.isFinite(e)) worst = e;
+    }
+    check('EM3 R+T=1 within 1e-9 for 500 random lossless cases', ok && nTir > 0 && nProp > 0, 'worst |R+T−1|=' + worst.toExponential(2) + ', TIR cases=' + nTir); }
+  // 4
+  { let ok = true, bad = '';
+    const media = [[1, 1, 0, 2.25, 1, 0], [2.25, 1, 0, 1, 1, 0], [1, 1, 0, 4, 1, 0.05], [1, 1, 0, 1, 1, 5.8e7], [1, 1, 0, 2, 3, 0], [4, 1, 0.1, 1, 1, 0]];
+    for (const m of media) for (const th of [0, 89]) for (const pol of ['TE', 'TM']) {
+      const an = emAnalyze(th, pol, makeMedium(m[0], m[1], m[2], F), makeMedium(m[3], m[4], m[5], F));
+      const vals = [an.r.re, an.r.im, an.t.re, an.t.im, an.R, an.T, an.phaseDeg];
+      const txt = [fmtPolar(an.r), fmtPolar(an.t), fmtNum(an.R), fmtNum(an.T), fmtDeg(an.phaseDeg), fmtDeg(an.thetaT), fmtSI(an.deltaPhys, 'm'), fmtDeg(an.brewster.tm), fmtDeg(an.thetaC)].join(' ');
+      if (!vals.every(Number.isFinite) || /NaN|Infinity/.test(txt)) { ok = false; bad = JSON.stringify(m) + ' θ=' + th + ' ' + pol; }
+    }
+    check('EM4 θi=0 and 89° give no NaN/Infinity for any polarization', ok, bad || '6 media × 2 angles × 2 pols'); }
+  // 5
+  { const m1 = makeMedium(1, 1, 0, F), m2 = makeMedium(4, 1, 0.05, F);
+    const a = emAnalyze(30, 'TE', m1, m2), b = emAnalyze(70, 'TM', m1, m2);
+    check('EM5 σ2>0: R+T=1 within 1e-9 (TE 30°, TM 70°)', near(a.sum, 1, 1e-9) && near(b.sum, 1, 1e-9), 'TE: ' + a.sum.toFixed(12) + ' TM: ' + b.sum.toFixed(12));
+    check('EM5 pseudo-Brewster reported and labelled', b.brewster.kind === 'pseudo' && Number.isFinite(b.brewster.tm) && /pseudo/.test(b.brewster.label), fmtDeg(b.brewster.tm, 3) + ' |r|min=' + b.brewster.rmin.toExponential(2)); }
+  // 6
+  { const fs = 48000, fc = fs / 10, c = rbjCoefs('lp', fc, fs, 0.7071, 0);
+    const atFc = magDb(freqResponseAt(c, 2 * Math.PI * fc / fs)), dc = magDb(freqResponseAt(c, 0)), ny = magDb(freqResponseAt(c, Math.PI));
+    check('DSP6 LP Q=0.7071: |H(fc)|=−3.01±0.02 dB, DC=0 dB, Nyquist<−30 dB', near(atFc, -3.01, 0.02) && near(dc, 0, 1e-9) && ny < -30, 'fc:' + atFc.toFixed(3) + ' dc:' + dc.toExponential(1) + ' nyq:' + ny.toFixed(1)); }
+  // 7
+  { const fs = 48000, fc = 1000;
+    const pk = magDb(freqResponseAt(rbjCoefs('peak', fc, fs, 1, 12), 2 * Math.PI * fc / fs));
+    const nt = magDb(freqResponseAt(rbjCoefs('notch', fc, fs, 1, 0), 2 * Math.PI * fc / fs));
+    check('DSP7 Peaking +12 dB → |H(fc)|=12.00±0.01; Notch |H(fc)|<−80 dB', near(pk, 12, 0.01) && nt < -80, 'peak:' + pk.toFixed(4) + ' notch:' + nt.toFixed(1)); }
+  // 8
+  { const N = 256, c = rbjCoefs('lp', 4800, 48000, 0.7071, 0), h = impulseResponse(c, N);
+    const H = []; for (let k = 0; k < N; k++) H.push(freqResponseAt(c, 2 * Math.PI * k / N));
+    let worst = 0;
+    for (let n = 0; n < N; n++) { let acc = 0; for (let k = 0; k < N; k++) { const w = 2 * Math.PI * k * n / N; acc += H[k].re * Math.cos(w) - H[k].im * Math.sin(w); } const e = Math.abs(acc / N - h[n]); if (e > worst) worst = e; }
+    check('DSP8 DF-II-T impulse response matches IDFT of H within 1e-6 (256 samples)', worst < 1e-6, 'max err=' + worst.toExponential(2)); }
+  // 9
+  { const cases = [[[C(0.5, 0.3), C(0.5, -0.3)], [C(-1, 0), C(-1, 0)]], [[C(0.6, 0), C(0.6, 0)], [C(0.2, 0.9), C(0.2, -0.9)]], [[C(0.9, 0), C(-0.4, 0)], [C(1, 0), C(-1, 0)]]];
+    let worst = 0;
+    for (const [p, z] of cases) {
+      const c = coefsFromRoots({ poles: p, zeros: z, K: 0.37 }), rr = rootsFromCoefs(c);
+      const err = (a, b) => Math.min(a[0].sub(b[0]).abs() + a[1].sub(b[1]).abs(), a[0].sub(b[1]).abs() + a[1].sub(b[0]).abs());
+      worst = Math.max(worst, err(p, rr.poles), err(z, rr.zeros), Math.abs(rr.K - 0.37));
+    }
+    check('DSP9 roots→coefs→roots round trip within 1e-9 (incl. double root)', worst < 1e-9, 'max err=' + worst.toExponential(2)); }
+  // 10
+  { const roots = rootsFromCoefs(rbjCoefs('lp', 1000, 48000, 0.7071, 0));
+    applyRootMove(roots, 'pole', 0, 1.2, 0.3, 1e-9);
+    const r1 = poleRadii(coefsFromRoots(roots));
+    applyRootMove(roots, 'pole', 1, -5, 0, 1e-9);
+    const r2 = poleRadii(coefsFromRoots(roots));
+    const ok = r1.every(x => x <= POLE_RMAX + 1e-12) && r2.every(x => x <= POLE_RMAX + 1e-12);
+    check('DSP10 dragging a pole to |p|≥1 never yields |p|>0.9999', ok, 'radii: ' + r1.map(x => x.toFixed(6)).join(', ') + ' / ' + r2.map(x => x.toFixed(6)).join(', ')); }
+  const passed = results.filter(r => r.ok).length;
+  const summary = passed + '/' + results.length + ' checks passed';
+  lines.push(summary); console.log(summary);
+  return { passed, failed: results.length - passed, results, lines };
+}
+window.runSelfTests = runSelfTests;
+</script>
+<script>
+/* ===================== UI ===================== */
+'use strict';
+const $ = id => document.getElementById(id);
+function prepCanvas(cv) {
+  const rect = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  const w = Math.max(1, Math.round(rect.width)), h = Math.max(1, Math.round(rect.height));
+  const pw = Math.round(w * dpr), ph = Math.round(h * dpr);
+  if (cv.width !== pw || cv.height !== ph) { cv.width = pw; cv.height = ph; }
+  const ctx = cv.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return { ctx, w, h, dpr };
+}
+function clamp(v, a, b) { return Math.min(b, Math.max(a, v)); }
+function arrow(ctx, x0, y0, x1, y1, head) {
+  ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+  const a = Math.atan2(y1 - y0, x1 - x0); head = head || 6;
+  ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x1 - head * Math.cos(a - 0.45), y1 - head * Math.sin(a - 0.45)); ctx.lineTo(x1 - head * Math.cos(a + 0.45), y1 - head * Math.sin(a + 0.45)); ctx.closePath(); ctx.fill();
+}
+function labelBox(ctx, text, x, y, align) {
+  ctx.font = '12px ' + getComputedStyle(document.body).getPropertyValue('--mono');
+  const wt = ctx.measureText(text).width + 8; const xx = align === 'right' ? x - wt : align === 'center' ? x - wt / 2 : x;
+  ctx.fillStyle = 'rgba(11,15,23,0.72)'; ctx.fillRect(xx, y - 13, wt, 17);
+  ctx.fillStyle = '#e6edf3'; ctx.textAlign = 'left'; ctx.fillText(text, xx + 4, y);
+}
+
+/* ---------- tabs & animation loops ---------- */
+let activeModule = 'em', emRaf = 0, dspRaf = 0;
+const tabs = Array.from(document.querySelectorAll('[role=tab]'));
+function activateTab(id, focus) {
+  const next = id === 'tab-dsp' ? 'dsp' : 'em';
+  tabs.forEach(t => { const on = t.id === id; t.setAttribute('aria-selected', on ? 'true' : 'false'); t.tabIndex = on ? 0 : -1; $(t.getAttribute('aria-controls')).hidden = !on; if (on && focus) t.focus(); });
+  if (next !== activeModule) {
+    activeModule = next;
+    stopLoops();
+    if (next === 'em') { stopAudio('tab switch'); em.dirty = true; } else { dspRedrawAll(); }
+    startLoops();
+  }
+}
+tabs.forEach((t, i) => {
+  t.addEventListener('click', () => activateTab(t.id, false));
+  t.addEventListener('keydown', e => {
+    let j = null;
+    if (e.key === 'ArrowRight') j = (i + 1) % tabs.length; else if (e.key === 'ArrowLeft') j = (i - 1 + tabs.length) % tabs.length;
+    else if (e.key === 'Home') j = 0; else if (e.key === 'End') j = tabs.length - 1;
+    if (j !== null) { e.preventDefault(); activateTab(tabs[j].id, true); }
+  });
+});
+function startLoops() {
+  if (document.hidden) return;
+  if (activeModule === 'em') { if (!emRaf) emRaf = requestAnimationFrame(emFrame); }
+  else if (!dspRaf) dspRaf = requestAnimationFrame(dspFrame);
+}
+function stopLoops() { if (emRaf) cancelAnimationFrame(emRaf); if (dspRaf) cancelAnimationFrame(dspRaf); emRaf = 0; dspRaf = 0; em.lastTs = 0; }
+document.addEventListener('visibilitychange', () => { if (document.hidden) stopLoops(); else startLoops(); });
+
+/* ===================== MODULE 1: EM ===================== */
+const em = { theta: 45, pol: 'TE', logf: 9, er1: 1, mr1: 1, s1: 0, er2: 2.25, mr2: 1, s2: 0, span: 10, speed: 1, playing: true,
+  quality: 240, arrows: 'inst', field: 'A', phase: 0, lastTs: 0, dirty: true, cache: null, an: null, m1: null, m2: null, oc: null, img: null, hudT: 0, rtDirty: true };
+const EM_LUT = (() => { // diverging colormap: blue (−1) → dark (0) → orange (+1)
+  const stops = [[-1, [60, 140, 255]], [-0.5, [34, 70, 150]], [0, [14, 18, 30]], [0.5, [160, 60, 40]], [1, [255, 150, 70]]];
+  const lut = new Uint8ClampedArray(256 * 3);
+  for (let i = 0; i < 256; i++) {
+    const v = i / 255 * 2 - 1; let k = 0; while (k < stops.length - 2 && v > stops[k + 1][0]) k++;
+    const [v0, c0] = stops[k], [v1, c1] = stops[k + 1], f = (v - v0) / (v1 - v0);
+    for (let c = 0; c < 3; c++) lut[i * 3 + c] = c0[c] + (c1[c] - c0[c]) * f;
+  }
+  return lut;
+})();
+const EM_PRESETS = {
+  airglass: { er1: 1, mr1: 1, s1: 0, er2: 2.25, mr2: 1, s2: 0, theta: 45 },
+  glassair: { er1: 2.25, mr1: 1, s1: 0, er2: 1, mr2: 1, s2: 0, theta: 60 },
+  seawater: { er1: 1, mr1: 1, s1: 0, er2: 72, mr2: 1, s2: 4, theta: 45, logf: 9 },
+  copper: { er1: 1, mr1: 1, s1: 0, er2: 1, mr2: 1, s2: 5.8e7, theta: 45, logf: 9 },
+  magnetic: { er1: 1, mr1: 1, s1: 0, er2: 2, mr2: 3, s2: 0, theta: 37.8 }
+};
+function emReadInputs() {
+  em.er1 = Math.max(1e-9, +$('em-er1').value || 1); em.mr1 = Math.max(1e-9, +$('em-mr1').value || 1); em.s1 = Math.max(0, +$('em-s1').value || 0);
+  em.er2 = Math.max(1e-9, +$('em-er2').value || 1); em.mr2 = Math.max(1e-9, +$('em-mr2').value || 1); em.s2 = Math.max(0, +$('em-s2').value || 0);
+  em.logf = +$('em-freq').value; em.span = +$('em-span').value;
+  em.dirty = true; em.rtDirty = true;
+}
+function emSetTheta(v) { v = clamp(Math.round(v * 10) / 10, 0, 89); em.theta = v; $('em-theta').value = v; $('em-theta-n').value = v; em.dirty = true; }
+function emSetPol(p) { em.pol = p; $('em-pol-te').setAttribute('aria-pressed', p === 'TE'); $('em-pol-tm').setAttribute('aria-pressed', p === 'TM'); $('em-field').disabled = p !== 'TM'; if (p !== 'TM') { em.field = 'A'; $('em-field').value = 'A'; } em.dirty = true; em.rtDirty = true; }
+function emApplyPreset(p) {
+  for (const k of ['er1', 'mr1', 's1', 'er2', 'mr2', 's2']) $('em-' + k).value = p[k];
+  if (p.logf !== undefined) $('em-freq').value = p.logf;
+  emReadInputs(); emSetTheta(p.theta);
+}
+['em-er1', 'em-mr1', 'em-s1', 'em-er2', 'em-mr2', 'em-s2', 'em-freq', 'em-span'].forEach(id => $(id).addEventListener('input', emReadInputs));
+$('em-theta').addEventListener('input', e => emSetTheta(+e.target.value));
+$('em-theta-n').addEventListener('change', e => emSetTheta(+e.target.value));
+$('em-pol-te').addEventListener('click', () => emSetPol('TE'));
+$('em-pol-tm').addEventListener('click', () => emSetPol('TM'));
+$('em-presets').addEventListener('click', e => { const b = e.target.closest('[data-preset]'); if (b) emApplyPreset(EM_PRESETS[b.dataset.preset]); });
+$('em-speed').addEventListener('input', e => { em.speed = +e.target.value; });
+$('em-play').addEventListener('click', () => { em.playing = !em.playing; $('em-play').textContent = em.playing ? 'Pause' : 'Play'; $('em-play').setAttribute('aria-pressed', em.playing); });
+$('em-quality').addEventListener('change', e => { em.quality = +e.target.value; em.dirty = true; });
+$('em-arrows').addEventListener('change', e => { em.arrows = e.target.value; });
+$('em-field').addEventListener('change', e => { em.field = e.target.value; });
+$('em-field').disabled = true;
+$('em-canvas').addEventListener('pointerdown', e => { e.currentTarget.setPointerCapture(e.pointerId); em.drag = true; emPointerTheta(e); });
+$('em-canvas').addEventListener('pointermove', e => { if (em.drag) emPointerTheta(e); });
+$('em-canvas').addEventListener('pointerup', () => { em.drag = false; });
+$('em-canvas').addEventListener('pointercancel', () => { em.drag = false; });
+function emPointerTheta(e) {
+  const r = e.currentTarget.getBoundingClientRect(), x = e.clientX - r.left - r.width / 2, z = e.clientY - r.top - r.height / 2;
+  if (z >= -2) return; // only above the interface (medium 1)
+  emSetTheta(Math.atan2(Math.abs(x), -z) * 180 / Math.PI);
+}
+new ResizeObserver(() => { em.dirty = true; em.rtDirty = true; }).observe($('em-canvas'));
+
+function emRecompute() {
+  const f = Math.pow(10, em.logf);
+  em.m1 = makeMedium(em.er1, em.mr1, em.s1, f); em.m2 = makeMedium(em.er2, em.mr2, em.s2, f);
+  em.an = emAnalyze(em.theta, em.pol, em.m1, em.m2);
+  const { w, h } = prepCanvas($('em-canvas'));
+  const iw = em.quality, ih = Math.max(2, Math.round(iw * h / w));
+  em.cache = buildFieldCache(em.an.sol, iw, ih, em.span, h / w);
+  if (!em.oc || em.oc.width !== iw || em.oc.height !== ih) { em.oc = document.createElement('canvas'); em.oc.width = iw; em.oc.height = ih; em.octx = em.oc.getContext('2d'); em.img = em.octx.createImageData(iw, ih); }
+  em.dirty = false;
+  emUpdateHud();
+  if (em.rtDirty) { emDrawRT(); em.rtDirty = false; }
+}
+function emUpdateHud() {
+  const an = em.an, m1 = em.m1, m2 = em.m2, f = m1.freq;
+  $('em-freq-o').value = fmtSI(f, 'Hz'); $('em-lambda0').textContent = fmtSI(an.lambda0, 'm'); $('em-span-o').value = em.span.toFixed(1);
+  $('em-n1').textContent = m1.nReal.toFixed(4) + (m1.lossy ? '  (n_c = ' + fmtComplexN(m1.nc) + ')' : '');
+  $('em-n2').textContent = m2.nReal.toFixed(4) + (m2.lossy ? '  (n_c = ' + fmtComplexN(m2.nc) + ')' : '');
+  const badge = an.conserv === 'pass' ? '<span class="badge ok">PASS</span>' : an.conserv === 'fail' ? '<span class="badge bad">FAIL</span>' : '<span class="badge warn">n/a (σ1&gt;0: interference flux)</span>';
+  const b = an.brewster;
+  const rows = [
+    ['Polarization', em.pol + (em.pol === 'TE' ? ' (E ∥ y)' : ' (H ∥ y)')],
+    ['θi / θr', fmtDeg(em.theta, 1) + ' / ' + fmtDeg(em.theta, 1)],
+    ['θt', an.evanescent ? 'evanescent' : fmtDeg(an.thetaT)],
+    ['r = Γ', fmtPolar(an.r)],
+    ['t = τ', fmtPolar(an.t)],
+    ['refl. phase shift', fmtDeg(an.phaseDeg)],
+    ['R = |r|²', fmtNum(an.R, 6)],
+    ['T (Poynting flux)', fmtNum(an.T, 6)],
+    ['R + T', fmtNum(an.sum, 10) + ' ' + badge],
+    [b.kind === 'exact' ? 'Brewster θB (TM)' : 'pseudo-Brewster (min |r_TM|)', b.tm === null || !Number.isFinite(b.tm) ? 'N/A' : fmtDeg(b.tm, 3) + (b.kind === 'pseudo' ? ' (|r|=' + b.rmin.toFixed(4) + ')' : '')],
+    ['Brewster θB (TE)', b.kind === 'exact' && b.te !== null ? fmtDeg(b.te, 3) : 'N/A'],
+    ['critical θc', an.thetaC === null ? 'N/A' : fmtDeg(an.thetaC, 3)],
+    [an.evanescent ? 'evanescent decay δ' : 'decay length δ', Number.isFinite(an.delta) ? fmtNum(an.delta, 4) + ' λ0 = ' + fmtSI(an.deltaPhys, 'm') : '— (propagating)'],
+    ['λ0 / λ1 / λ2', fmtSI(an.lambda0, 'm') + ' / ' + fmtSI(an.lambda0 / Math.max(m1.nc.re, 1e-300), 'm') + ' / ' + fmtSI(an.lambda0 / Math.max(m2.nc.re, 1e-300), 'm')],
+    ['η1 / η2', fmtPolar(m1.eta).replace(/^([\d.]+)/, (s, a) => (+a).toFixed(1)) + ' Ω / ' + fmtPolar(m2.eta).replace(/^([\d.]+)/, (s, a) => (+a).toFixed(1)) + ' Ω'],
+    ['ωt', (em.phase * 180 / Math.PI).toFixed(0) + '°' + (em.playing ? '' : ' (paused)')]
+  ];
+  $('em-hud').innerHTML = rows.map(r => '<div><span>' + r[0] + '</span><span>' + r[1] + '</span></div>').join('');
+}
+function emFrame(ts) {
+  emRaf = 0;
+  if (activeModule !== 'em' || document.hidden) return;
+  if (em.lastTs && em.playing) em.phase = (em.phase + em.speed * Math.min(0.1, (ts - em.lastTs) / 1000) * Math.PI) % (2 * Math.PI);
+  em.lastTs = ts;
+  if (em.dirty) emRecompute();
+  emRender();
+  if (ts - em.hudT > 100) { em.hudT = ts; emUpdateHud(); emDrawRTMarker(); }
+  emRaf = requestAnimationFrame(emFrame);
+}
+function emRender() {
+  const cv = $('em-canvas'), { ctx, w, h } = prepCanvas(cv), cache = em.cache, an = em.an, sol = an.sol;
+  const cphi = Math.cos(em.phase), sphi = Math.sin(em.phase), n = cache.iw * cache.ih, data = em.img.data;
+  const emag = em.pol === 'TM' && em.field === 'E';
+  const { Are, Aim, Bre, Bim, Dre, Dim } = cache;
+  if (emag) {
+    const inv = 127 / cache.vmaxE;
+    for (let k = 0, p = 0; k < n; k++, p += 4) {
+      const ex = Bre[k] * cphi - Bim[k] * sphi, ez = Dre[k] * cphi - Dim[k] * sphi;
+      const idx = 128 + Math.min(127, Math.sqrt(ex * ex + ez * ez) * inv) | 0;
+      data[p] = EM_LUT[idx * 3]; data[p + 1] = EM_LUT[idx * 3 + 1]; data[p + 2] = EM_LUT[idx * 3 + 2]; data[p + 3] = 255;
+    }
+  } else {
+    const inv = 127.5 / cache.vmaxA;
+    for (let k = 0, p = 0; k < n; k++, p += 4) {
+      let v = (Are[k] * cphi - Aim[k] * sphi) * inv; if (v > 127.5) v = 127.5; else if (v < -127.5) v = -127.5;
+      const idx = (v + 127.5) | 0;
+      data[p] = EM_LUT[idx * 3]; data[p + 1] = EM_LUT[idx * 3 + 1]; data[p + 2] = EM_LUT[idx * 3 + 2]; data[p + 3] = 255;
+    }
+  }
+  em.octx.putImageData(em.img, 0, 0);
+  ctx.imageSmoothingEnabled = true; ctx.drawImage(em.oc, 0, 0, w, h);
+
+  const scale = w / em.span, ox = w / 2, oy = h / 2;
+  // Poynting arrows
+  if (em.arrows !== 'off') {
+    const g = 40, pts = [];
+    let smax = 0;
+    for (let gy = g / 2; gy < h; gy += g) for (let gx = g / 2; gx < w; gx += g) {
+      const i = Math.min(cache.iw - 1, (gx / w * cache.iw) | 0), j = Math.min(cache.ih - 1, (gy / h * cache.ih) | 0), k = j * cache.iw + i;
+      const F = { A: C(Are[k], Aim[k]), B: C(Bre[k], Bim[k]), D: C(Dre[k], Dim[k]) };
+      const S = em.arrows === 'avg' ? poyntingAvg(em.pol, F) : poyntingInst(em.pol, F, em.phase);
+      const m = Math.hypot(S.x, S.z); if (Number.isFinite(m)) { pts.push([gx, gy, S.x, S.z, m]); if (m > smax) smax = m; }
+    }
+    ctx.strokeStyle = 'rgba(255,255,255,0.75)'; ctx.fillStyle = 'rgba(255,255,255,0.75)'; ctx.lineWidth = 1.2;
+    const cap = g * 0.85;
+    for (const [gx, gy, sx, sz, m] of pts) {
+      if (!(m > 1e-9 * smax) || smax === 0) continue;
+      const L = Math.min(cap, cap * m / smax); if (L < 2) continue;
+      arrow(ctx, gx - sx / m * L / 2, gy - sz / m * L / 2, gx + sx / m * L / 2, gy + sz / m * L / 2, 5);
+    }
+  }
+  // interface, normal
+  ctx.lineWidth = 2; ctx.strokeStyle = '#e6edf3'; ctx.beginPath(); ctx.moveTo(0, oy); ctx.lineTo(w, oy); ctx.stroke();
+  ctx.setLineDash([6, 5]); ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(230,237,243,0.6)'; ctx.beginPath(); ctx.moveTo(ox, 0); ctx.lineTo(ox, h); ctx.stroke(); ctx.setLineDash([]);
+  ctx.fillStyle = 'rgba(230,237,243,0.8)'; arrow(ctx, ox, oy, ox, oy - 34, 7);
+  labelBox(ctx, 'n̂', ox + 8, oy - 36);
+  // rays
+  const th = em.theta * Math.PI / 180, L = Math.min(w, h) * 0.46, si = Math.sin(th), ci = Math.cos(th);
+  const drawRay = (x0, y0, x1, y1, color, label, lx, ly) => { ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 2; arrow(ctx, x0, y0, x1, y1, 9); if (label && w >= 720) labelBox(ctx, label, clamp(lx, 40, w - 40), clamp(ly, 50, h - 24), 'center'); };
+  const wavefronts = (dirx, diry, kvec, fromX, fromY, len) => { // ticks perpendicular to the ray, spaced by λ along it
+    const kmag = Math.hypot(kvec.re, kvec.im2); if (!(kmag > 1e-9)) return;
+    const lam = 2 * Math.PI / kmag * scale; if (lam < 4) return;
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 1;
+    for (let d = lam; d < len; d += lam) { const x = fromX + dirx * d, y = fromY + diry * d; ctx.beginPath(); ctx.moveTo(x - diry * 12, y + dirx * 12); ctx.lineTo(x + diry * 12, y - dirx * 12); ctx.stroke(); }
+  };
+  // incident (from upper-left to origin), reflected (origin to upper-right)
+  drawRay(ox - L * si, oy - L * ci, ox, oy, '#4cc9f0', 'incident', ox - L * si - 10, oy - L * ci - 6);
+  wavefronts(si, ci, { re: sol.kx.re, im2: sol.kz1.re }, ox - L * si, oy - L * ci, L);
+  drawRay(ox, oy, ox + L * si, oy - L * ci, '#f9a03f', 'reflected', ox + L * si + 10, oy - L * ci - 6);
+  wavefronts(si, -ci, { re: sol.kx.re, im2: sol.kz1.re }, ox, oy, L);
+  if (!an.evanescent && Number.isFinite(an.thetaT)) {
+    const tt = an.thetaT * Math.PI / 180, st = Math.sin(tt), ct = Math.cos(tt);
+    drawRay(ox, oy, ox + L * st, oy + L * ct, '#f72585', 'transmitted', ox + L * st + 14, oy + L * ct + 14);
+    wavefronts(st, ct, { re: sol.kx.re, im2: sol.kz2.re }, ox, oy, L);
+    ctx.strokeStyle = '#f72585'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.arc(ox, oy, 48, Math.PI / 2, Math.PI / 2 - tt, true); ctx.stroke();
+    labelBox(ctx, 'θt=' + fmtDeg(an.thetaT, 1), ox + 62 * Math.sin(tt / 2) + 4, oy + 62 * Math.cos(tt / 2) + 6);
+  } else {
+    ctx.strokeStyle = '#f72585'; ctx.fillStyle = '#f72585'; ctx.lineWidth = 2; ctx.setLineDash([8, 6]); arrow(ctx, ox, oy + 8, ox + L * 0.8, oy + 8, 9); ctx.setLineDash([]);
+    labelBox(ctx, 'evanescent (no propagating θt)', ox + 10, oy + 28);
+  }
+  // angle arcs θi, θr
+  ctx.lineWidth = 1.2; ctx.strokeStyle = '#4cc9f0'; ctx.beginPath(); ctx.arc(ox, oy, 48, -Math.PI / 2, -Math.PI / 2 - th, true); ctx.stroke();
+  labelBox(ctx, 'θi=' + fmtDeg(em.theta, 1), ox - 64 * Math.sin(th / 2) - 4, oy - 64 * Math.cos(th / 2) + 4, 'right');
+  ctx.strokeStyle = '#f9a03f'; ctx.beginPath(); ctx.arc(ox, oy, 48, -Math.PI / 2, -Math.PI / 2 + th, false); ctx.stroke();
+  labelBox(ctx, 'θr=' + fmtDeg(em.theta, 1), ox + 64 * Math.sin(th / 2) + 4, oy - 64 * Math.cos(th / 2) + 4);
+  // decay envelope
+  if (Number.isFinite(an.delta)) {
+    const dpx = an.delta * scale;
+    ctx.setLineDash([4, 4]); ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 1;
+    for (let m = 1; m <= 3; m++) { const y = oy + m * dpx; if (y > h - 4) break; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); labelBox(ctx, 'z = ' + m + 'δ', 8, y - 3); }
+    ctx.setLineDash([]);
+    ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 1.5; ctx.beginPath();
+    for (let y = oy; y <= h; y += 2) { const x = w - 12 - 56 * Math.exp(-(y - oy) / Math.max(dpx, 1e-6)); if (y === oy) ctx.moveTo(x, y); else ctx.lineTo(x, y); }
+    ctx.stroke(); labelBox(ctx, 'e^(−z/δ)', w - 8, oy + 16, 'right');
+  }
+  // medium labels & shown field
+  const m1 = em.m1, m2 = em.m2;
+  labelBox(ctx, 'Medium 1  εr=' + m1.er + '  μr=' + m1.mr + '  σ=' + m1.sigma + ' S/m  n=' + m1.nReal.toFixed(3), 8, 18);
+  labelBox(ctx, 'Medium 2  εr=' + m2.er + '  μr=' + m2.mr + '  σ=' + m2.sigma + ' S/m  n=' + m2.nReal.toFixed(3), 8, h - 8);
+  const showTxt = 'showing ' + (emag ? '|E| (Ex,Ez)' : em.pol === 'TE' ? 'Ey' : 'Hy') + ' · ' + em.pol + ' · arrows: ' + (em.arrows === 'avg' ? '⟨S⟩' : em.arrows === 'inst' ? 'S(t)' : 'off');
+  if (w < 720) labelBox(ctx, showTxt, 8, 36); else labelBox(ctx, showTxt, w - 8, 18, 'right');
+}
+function emPower(th, pol, m1, m2) { // R and T only (cheap, for the sweep plot)
+  const sol = solveInterface(th, pol, m1, m2);
+  const SzInc = poyntingAvg(pol, fieldPhasors(sol, 0, 0, 'inc')).z, SzTr = poyntingAvg(pol, fieldPhasors(sol, 0, 0, 'tr')).z;
+  return { R: sol.r.isFinite() ? sol.r.abs2() : NaN, T: Math.abs(SzInc) > 1e-300 ? SzTr / SzInc : NaN };
+}
+function emDrawRT() { // curves rendered once into an offscreen canvas; the marker is drawn per frame
+  const cv = $('em-rt'), rect = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  const w = Math.max(1, Math.round(rect.width)), h = Math.max(1, Math.round(rect.height));
+  if (!em.rtOc) em.rtOc = document.createElement('canvas');
+  em.rtOc.width = Math.round(w * dpr); em.rtOc.height = Math.round(h * dpr);
+  const ctx = em.rtOc.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const L = 40, R = 12, T = 10, B = 22, pw = w - L - R, ph = h - T - B;
+  ctx.fillStyle = '#121826'; ctx.fillRect(0, 0, w, h);
+  ctx.strokeStyle = '#243047'; ctx.lineWidth = 1; ctx.font = '11px ' + getComputedStyle(document.body).getPropertyValue('--mono'); ctx.fillStyle = '#8b98ab';
+  for (let v = 0; v <= 1; v += 0.25) { const y = T + ph * (1 - v); ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(w - R, y); ctx.stroke(); ctx.textAlign = 'right'; ctx.fillText(v.toFixed(2), L - 4, y + 4); }
+  for (let d = 0; d <= 90; d += 15) { const x = L + pw * d / 90; ctx.beginPath(); ctx.moveTo(x, T); ctx.lineTo(x, T + ph); ctx.stroke(); ctx.textAlign = 'center'; ctx.fillText(d + '°', x, h - 6); }
+  const series = [['TE', 'R', '#4cc9f0'], ['TE', 'T', '#2ecc71'], ['TM', 'R', '#f9a03f'], ['TM', 'T', '#f72585']];
+  const N = 181;
+  for (const [pol, key, col] of series) {
+    ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.beginPath(); let started = false;
+    for (let i = 0; i < N; i++) { const th = 89.9 * i / (N - 1); const an = emPower(th, pol, em.m1, em.m2); const v = an[key]; if (!Number.isFinite(v)) { started = false; continue; } const x = L + pw * th / 90, y = T + ph * (1 - clamp(v, 0, 1)); if (started) ctx.lineTo(x, y); else { ctx.moveTo(x, y); started = true; } }
+    ctx.stroke();
+  }
+  ctx.textAlign = 'left'; let lx = L + 6; for (const [pol, key, col] of series) { ctx.fillStyle = col; ctx.fillText(key + '_' + pol, lx, T + 12); lx += 46; }
+  em.rtCanvasInfo = { L, pw, T, ph, w, h };
+}
+function emDrawRTMarker() {
+  const cv = $('em-rt'), { ctx, w, h } = prepCanvas(cv), i = em.rtCanvasInfo; if (!i || !em.rtOc) return;
+  ctx.drawImage(em.rtOc, 0, 0, w, h);
+  const x = i.L + i.pw * em.theta / 90;
+  ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.moveTo(x, i.T); ctx.lineTo(x, i.T + i.ph); ctx.stroke(); ctx.setLineDash([]);
+  const an = em.an; if (!an) return;
+  ctx.fillStyle = em.pol === 'TE' ? '#4cc9f0' : '#f9a03f'; ctx.beginPath(); ctx.arc(x, i.T + i.ph * (1 - clamp(an.R, 0, 1)), 4, 0, 7); ctx.fill();
+  ctx.fillStyle = em.pol === 'TE' ? '#2ecc71' : '#f72585'; ctx.beginPath(); ctx.arc(x, i.T + i.ph * (1 - clamp(an.T, 0, 1)), 4, 0, 7); ctx.fill();
+}
+/* ===================== MODULE 2: DSP ===================== */
+const dsp = { type: 'lp', fc: 1000, fs: 48000, Q: 0.7071, gainDb: 0, N: 128, custom: false, normalize: true, autoRange: false,
+  coefs: null, roots: null, refLevel: 1, resp: null, h: null, hLen: 128, stable: true, lastStable: null, sel: null, drag: null, cursorF: null };
+const MONO = () => getComputedStyle(document.body).getPropertyValue('--mono');
+function dspMaxLogFc() { return Math.log10(0.49 * dsp.fs); }
+function dspSetFc(f) {
+  f = clamp(f, 10, 0.49 * dsp.fs); dsp.fc = f;
+  $('dsp-fc').max = dspMaxLogFc().toFixed(4); $('dsp-fc').value = Math.log10(f); $('dsp-fc-n').value = +f.toPrecision(6); $('dsp-fc-n').max = 0.49 * dsp.fs;
+}
+function dspSetFs(fs, fromAudio) {
+  const sel = $('dsp-fs');
+  if (!Array.from(sel.options).some(o => +o.value === fs)) { const o = document.createElement('option'); o.value = fs; o.textContent = fs; sel.appendChild(o); }
+  sel.value = fs; dsp.fs = fs; dspSetFc(dsp.fc);
+  $('dsp-fs-note').textContent = fromAudio ? 'locked to AudioContext rate' : '';
+  sel.disabled = !!fromAudio;
+}
+function dspApplyCookbook() {
+  dsp.custom = false;
+  dsp.coefs = rbjCoefs(dsp.type, dsp.fc, dsp.fs, dsp.Q, dsp.gainDb);
+  dsp.roots = rootsFromCoefs(dsp.coefs);
+  dsp.refLevel = freqResponseAt(dsp.coefs, 2 * Math.PI * refFreqFor(dsp.type, dsp.fc, dsp.fs) / dsp.fs).abs();
+  dspUpdateAll();
+}
+function dspApplyRoots() {
+  dsp.custom = true;
+  const wref = 2 * Math.PI * refFreqFor(dsp.type, dsp.fc, dsp.fs) / dsp.fs;
+  if (dsp.normalize) {
+    const unit = freqResponseAt(coefsFromRoots({ poles: dsp.roots.poles, zeros: dsp.roots.zeros, K: 1 }), wref).abs();
+    if (unit > 1e-12 && dsp.refLevel > 1e-12) dsp.roots.K = dsp.refLevel / unit;
+  }
+  if (!(Math.abs(dsp.roots.K) > 1e-12)) dsp.roots.K = 1e-12;
+  dsp.coefs = coefsFromRoots(dsp.roots);
+  dspUpdateAll();
+}
+function dspUpdateAll() {
+  const c = dsp.coefs;
+  dsp.stable = isStable(c);
+  if (dsp.stable) { dsp.lastStable = c; audioPushCoefs(c); }
+  dsp.resp = freqResponse(c, dsp.fs, 1024, 20);
+  dsp.h = impulseResponse(c, dsp.N); dsp.hLen = Math.min(dsp.N, trimLength(dsp.h, 1e-6));
+  const f = x => (x >= 0 ? ' ' : '') + x.toFixed(9);
+  $('dsp-coefs').textContent = 'b0 =' + f(c.b0) + '\nb1 =' + f(c.b1) + '\nb2 =' + f(c.b2) + '\na0 =' + f(1) + '\na1 =' + f(c.a1) + '\na2 =' + f(c.a2) + '\n(pre-normalization a0 = ' + c.a0raw.toFixed(9) + ')';
+  const rad = poleRadii(c);
+  $('dsp-stable').textContent = dsp.stable ? 'STABLE' : 'UNSTABLE — audio keeps last stable set';
+  $('dsp-stable').className = 'badge ' + (dsp.stable ? 'ok' : 'bad');
+  $('dsp-poles-note').textContent = '|p| = ' + rad.map(x => x.toFixed(5)).join(', ') + (dsp.roots.zeroNote ? ' · ' + dsp.roots.zeroNote : '');
+  $('dsp-custom').hidden = !dsp.custom;
+  document.querySelectorAll('#dsp-types .seg-btn').forEach(b => b.classList.toggle('active', !dsp.custom && b.dataset.type === dsp.type));
+  dspRedrawAll();
+}
+function dspRedrawAll() { if (!dsp.resp) return; dspDrawMag(); dspDrawPhase(); dspDrawImpulse(); dspDrawZplane(); }
+// controls
+document.querySelectorAll('#dsp-types .seg-btn').forEach(b => b.addEventListener('click', () => { dsp.type = b.dataset.type; dspApplyCookbook(); }));
+$('dsp-fc').addEventListener('input', e => { dspSetFc(Math.pow(10, +e.target.value)); dspApplyCookbook(); });
+$('dsp-fc-n').addEventListener('change', e => { dspSetFc(+e.target.value || 1000); dspApplyCookbook(); });
+$('dsp-fs').addEventListener('change', e => { dspSetFs(+e.target.value, false); dspApplyCookbook(); });
+$('dsp-q').addEventListener('input', e => { dsp.Q = +e.target.value; $('dsp-q-n').value = dsp.Q; dspApplyCookbook(); });
+$('dsp-q-n').addEventListener('change', e => { dsp.Q = clamp(+e.target.value || 0.7071, 0.1, 20); $('dsp-q').value = dsp.Q; $('dsp-q-n').value = dsp.Q; dspApplyCookbook(); });
+$('dsp-gain').addEventListener('input', e => { dsp.gainDb = +e.target.value; $('dsp-gain-n').value = dsp.gainDb; dspApplyCookbook(); });
+$('dsp-gain-n').addEventListener('change', e => { dsp.gainDb = clamp(+e.target.value || 0, -24, 24); $('dsp-gain').value = dsp.gainDb; $('dsp-gain-n').value = dsp.gainDb; dspApplyCookbook(); });
+$('dsp-n').addEventListener('input', e => { dsp.N = +e.target.value; $('dsp-n-o').value = dsp.N; dsp.h = impulseResponse(dsp.coefs, dsp.N); dsp.hLen = Math.min(dsp.N, trimLength(dsp.h, 1e-6)); dspDrawImpulse(); });
+$('dsp-autorange').addEventListener('change', e => { dsp.autoRange = e.target.checked; dspDrawMag(); });
+$('dsp-normgain').addEventListener('change', e => { dsp.normalize = e.target.checked; });
+
+/* ---------- plots ---------- */
+function logX(fmin, fmax, x0, x1) { const k = (x1 - x0) / Math.log10(fmax / fmin); return f => x0 + Math.log10(f / fmin) * k; }
+function invLogX(fmin, fmax, x0, x1) { return x => fmin * Math.pow(fmax / fmin, (x - x0) / (x1 - x0)); }
+const F_TICKS = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000];
+const fmtHz = f => f >= 1000 ? (f / 1000).toFixed(f >= 10000 ? 0 : 1).replace(/\.0$/, '') + 'k' : f.toFixed(0);
+function plotFrame(cv, L, R, T, B) {
+  const { ctx, w, h } = prepCanvas(cv);
+  ctx.fillStyle = '#121826'; ctx.fillRect(0, 0, w, h); ctx.font = '11px ' + MONO(); ctx.lineWidth = 1;
+  return { ctx, w, h, L, R, T, B, pw: w - L - R, ph: h - T - B };
+}
+function drawLogGrid(P, fmin, fmax, nice) {
+  const { ctx } = P, xf = logX(fmin, fmax, P.L, P.L + P.pw);
+  ctx.strokeStyle = '#243047'; ctx.fillStyle = '#8b98ab'; ctx.textAlign = 'center';
+  for (const f of F_TICKS) { if (f < fmin || f > fmax) continue; const x = xf(f); ctx.beginPath(); ctx.moveTo(x, P.T); ctx.lineTo(x, P.T + P.ph); ctx.stroke(); ctx.fillText(fmtHz(f), x, P.h - 6); }
+  if (nice) { for (let d = 1; d < 10; d++) for (const e of [10, 100, 1000, 10000]) { const f = d * e; if (f > fmin && f < fmax && !F_TICKS.includes(f)) { const x = xf(f); ctx.strokeStyle = '#1a2233'; ctx.beginPath(); ctx.moveTo(x, P.T); ctx.lineTo(x, P.T + P.ph); ctx.stroke(); } } }
+  return xf;
+}
+function drawYGrid(P, y0, y1, step, unit) {
+  const { ctx } = P, yf = v => P.T + P.ph * (1 - (v - y0) / (y1 - y0));
+  ctx.strokeStyle = '#243047'; ctx.fillStyle = '#8b98ab'; ctx.textAlign = 'right';
+  for (let v = Math.ceil(y0 / step) * step; v <= y1 + 1e-9; v += step) { const y = yf(v); ctx.beginPath(); ctx.moveTo(P.L, y); ctx.lineTo(P.L + P.pw, y); ctx.stroke(); ctx.fillText(v.toFixed(0) + unit, P.L - 4, y + 4); }
+  return yf;
+}
+function fcMarker(P, xf) { const x = xf(dsp.fc); P.ctx.strokeStyle = 'rgba(249,160,63,0.8)'; P.ctx.setLineDash([4, 4]); P.ctx.beginPath(); P.ctx.moveTo(x, P.T); P.ctx.lineTo(x, P.T + P.ph); P.ctx.stroke(); P.ctx.setLineDash([]); P.ctx.fillStyle = '#f9a03f'; P.ctx.textAlign = 'left'; P.ctx.fillText('fc', x + 3, P.T + 11); }
+function cursorMarker(P, xf) { if (dsp.cursorF === null) return; const x = xf(dsp.cursorF); P.ctx.strokeStyle = 'rgba(255,255,255,0.7)'; P.ctx.beginPath(); P.ctx.moveTo(x, P.T); P.ctx.lineTo(x, P.T + P.ph); P.ctx.stroke(); }
+function dspDrawMag() {
+  const P = plotFrame($('dsp-mag'), 46, 12, 10, 20), r = dsp.resp;
+  let y0 = -60, y1 = 30;
+  if (dsp.autoRange) { let mn = Infinity, mx = -Infinity; for (const v of r.mag) { if (v < mn) mn = v; if (v > mx) mx = v; } y0 = Math.floor((mn - 5) / 10) * 10; y1 = Math.ceil((mx + 5) / 10) * 10; if (y1 - y0 < 20) y1 = y0 + 20; }
+  const xf = drawLogGrid(P, r.fmin, r.fmax, true), yf = drawYGrid(P, y0, y1, (y1 - y0) > 100 ? 20 : 10, '');
+  P.ctx.fillStyle = '#8b98ab'; P.ctx.textAlign = 'left'; P.ctx.fillText('|H| dB', P.L + 4, P.T + 11);
+  fcMarker(P, xf);
+  P.ctx.strokeStyle = '#4cc9f0'; P.ctx.lineWidth = 2; P.ctx.beginPath();
+  for (let i = 0; i < r.freqs.length; i++) { const x = xf(r.freqs[i]), y = clamp(yf(r.mag[i]), P.T - 2, P.T + P.ph + 2); if (i) P.ctx.lineTo(x, y); else P.ctx.moveTo(x, y); }
+  P.ctx.stroke(); cursorMarker(P, xf);
+}
+function dspDrawPhase() {
+  const P = plotFrame($('dsp-phase'), 46, 12, 10, 20), r = dsp.resp;
+  let mn = Infinity, mx = -Infinity; for (const v of r.phase) { if (v < mn) mn = v; if (v > mx) mx = v; }
+  const y0 = Math.floor(mn / 45) * 45, y1 = Math.max(y0 + 45, Math.ceil(mx / 45) * 45);
+  const xf = drawLogGrid(P, r.fmin, r.fmax, false), yf = drawYGrid(P, y0, y1, (y1 - y0) > 360 ? 90 : 45, '°');
+  P.ctx.fillStyle = '#8b98ab'; P.ctx.textAlign = 'left'; P.ctx.fillText('∠H (unwrapped)', P.L + 4, P.T + 11);
+  fcMarker(P, xf);
+  P.ctx.strokeStyle = '#f72585'; P.ctx.lineWidth = 2; P.ctx.beginPath();
+  for (let i = 0; i < r.freqs.length; i++) { const x = xf(r.freqs[i]), y = yf(r.phase[i]); if (i) P.ctx.lineTo(x, y); else P.ctx.moveTo(x, y); }
+  P.ctx.stroke(); cursorMarker(P, xf);
+}
+function dspDrawImpulse() {
+  const P = plotFrame($('dsp-impulse'), 46, 12, 10, 20), h = dsp.h, n = dsp.hLen;
+  let mx = 1e-12; for (let i = 0; i < n; i++) mx = Math.max(mx, Math.abs(h[i]));
+  const yf = v => P.T + P.ph * (1 - (v + mx) / (2 * mx)), xf = i => P.L + P.pw * (i + 0.5) / n;
+  const { ctx } = P; ctx.strokeStyle = '#243047'; ctx.fillStyle = '#8b98ab';
+  for (const v of [-1, -0.5, 0, 0.5, 1]) { const y = yf(v * mx); ctx.beginPath(); ctx.moveTo(P.L, y); ctx.lineTo(P.L + P.pw, y); ctx.stroke(); ctx.textAlign = 'right'; ctx.fillText((v * mx).toPrecision(2), P.L - 4, y + 4); }
+  ctx.textAlign = 'center'; const step = n <= 32 ? 4 : n <= 128 ? 16 : n <= 512 ? 64 : 128;
+  for (let i = 0; i < n; i += step) ctx.fillText(String(i), xf(i), P.h - 6);
+  labelBox(ctx, 'h[n] via DF-II-T · showing ' + n + ' of ' + dsp.N + (n < dsp.N ? ' (auto-trimmed: |h| < 1e-6 beyond)' : ''), P.L + 4, P.T + 13);
+  ctx.strokeStyle = '#2ecc71'; ctx.fillStyle = '#2ecc71'; ctx.lineWidth = n > 300 ? 1 : 1.5;
+  const y0 = yf(0), rad = n > 300 ? 1 : n > 128 ? 1.5 : 2.5;
+  for (let i = 0; i < n; i++) { const x = xf(i), y = yf(h[i]); ctx.beginPath(); ctx.moveTo(x, y0); ctx.lineTo(x, y); ctx.stroke(); ctx.beginPath(); ctx.arc(x, y, rad, 0, 7); ctx.fill(); }
+}
+function bodeCursor(e) {
+  const cv = e.currentTarget, rect = cv.getBoundingClientRect(), r = dsp.resp; if (!r) return;
+  const x = e.clientX - rect.left, L = 46, pw = rect.width - 46 - 12;
+  if (x < L || x > L + pw) { dsp.cursorF = null; } else { dsp.cursorF = invLogX(r.fmin, r.fmax, L, L + pw)(x); }
+  if (dsp.cursorF !== null) {
+    let i = Math.round(Math.log10(dsp.cursorF / r.fmin) / Math.log10(r.fmax / r.fmin) * (r.freqs.length - 1)); i = clamp(i, 0, r.freqs.length - 1);
+    $('dsp-cursor').textContent = 'f = ' + fmtSI(r.freqs[i], 'Hz', 4) + '   |H| = ' + r.mag[i].toFixed(2) + ' dB   ∠H = ' + r.phase[i].toFixed(1) + '°';
+  } else $('dsp-cursor').textContent = 'Hover or touch the Bode plots for a readout.';
+  dspDrawMag(); dspDrawPhase();
+}
+for (const id of ['dsp-mag', 'dsp-phase']) { const cv = $(id); cv.addEventListener('pointermove', bodeCursor); cv.addEventListener('pointerdown', bodeCursor); cv.addEventListener('pointerleave', () => { dsp.cursorF = null; $('dsp-cursor').textContent = 'Hover or touch the Bode plots for a readout.'; dspDrawMag(); dspDrawPhase(); }); }
+/* ---------- z-plane editor ---------- */
+function zGeom() {
+  const cv = $('dsp-zplane'), rect = cv.getBoundingClientRect(), w = rect.width, h = rect.height;
+  let maxZ = 1; for (const z of dsp.roots.zeros) maxZ = Math.max(maxZ, z.abs());
+  const view = Math.max(1.5, maxZ + 0.3), R = Math.max(1, (Math.min(w, h) / 2 - 14) / view);
+  return { w, h, cx: w / 2, cy: h / 2, R, view };
+}
+function dspDrawZplane() {
+  if ($('dsp-zplane').getBoundingClientRect().width < 40) return; // hidden panel
+  const { ctx, w, h } = prepCanvas($('dsp-zplane')), g = zGeom(), { cx, cy, R } = g;
+  ctx.fillStyle = '#121826'; ctx.fillRect(0, 0, w, h); ctx.font = '11px ' + MONO();
+  ctx.strokeStyle = '#1e293b'; ctx.lineWidth = 1;
+  for (let v = -Math.floor(g.view * 2) / 2; v <= g.view; v += 0.5) { const x = cx + v * R, y = cy - v * R; ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
+  ctx.strokeStyle = '#3b4a63'; ctx.beginPath(); ctx.moveTo(0, cy); ctx.lineTo(w, cy); ctx.stroke(); ctx.beginPath(); ctx.moveTo(cx, 0); ctx.lineTo(cx, h); ctx.stroke();
+  ctx.strokeStyle = '#8b98ab'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(cx, cy, R, 0, 7); ctx.stroke();
+  ctx.fillStyle = '#8b98ab'; ctx.textAlign = 'left'; ctx.fillText('Re', w - 20, cy - 4); ctx.fillText('Im', cx + 4, 12); ctx.fillText('|z|=1', cx + R * 0.72, cy - R * 0.72);
+  ctx.fillText('z-plane · ' + (dsp.custom ? 'custom roots' : FILTER_NAMES[dsp.type]), 6, h - 6);
+  const drawSet = (arr, kind) => {
+    const dbl = arr[0].sub(arr[1]).abs() < 1e-7;
+    arr.forEach((z, i) => {
+      if (dbl && i === 1) return;
+      const x = cx + z.re * R, y = cy - z.im * R, sel = dsp.sel && dsp.sel.kind === kind && (dsp.sel.idx === i || (dbl && dsp.sel.idx === 1));
+      ctx.lineWidth = sel ? 3 : 2; ctx.strokeStyle = kind === 'pole' ? '#ff5c5c' : '#4cc9f0';
+      if (sel) { ctx.fillStyle = 'rgba(255,255,255,0.12)'; ctx.beginPath(); ctx.arc(x, y, 13, 0, 7); ctx.fill(); }
+      if (kind === 'pole') { ctx.beginPath(); ctx.moveTo(x - 6, y - 6); ctx.lineTo(x + 6, y + 6); ctx.moveTo(x + 6, y - 6); ctx.lineTo(x - 6, y + 6); ctx.stroke(); }
+      else { ctx.beginPath(); ctx.arc(x, y, 6, 0, 7); ctx.stroke(); }
+      if (dbl) { ctx.fillStyle = ctx.strokeStyle; ctx.fillText('×2', x + 8, y - 8); }
+    });
+  };
+  drawSet(dsp.roots.zeros, 'zero'); drawSet(dsp.roots.poles, 'pole');
+}
+function zHit(px, py) {
+  const g = zGeom(); let best = null, bd = 14;
+  for (const kind of ['pole', 'zero']) (kind === 'pole' ? dsp.roots.poles : dsp.roots.zeros).forEach((z, i) => { const d = Math.hypot(g.cx + z.re * g.R - px, g.cy - z.im * g.R - py); if (d < bd) { bd = d; best = { kind, idx: i }; } });
+  return best;
+}
+function zMoveSelected(x, y, snapTol) {
+  applyRootMove(dsp.roots, dsp.sel.kind, dsp.sel.idx, x, y, snapTol);
+  dspApplyRoots();
+  const z = (dsp.sel.kind === 'pole' ? dsp.roots.poles : dsp.roots.zeros)[dsp.sel.idx];
+  $('dsp-sel-note').textContent = 'Selected: ' + dsp.sel.kind + ' ' + (dsp.sel.idx + 1) + ' at ' + fmtComplexN(z) + '  |z| = ' + z.abs().toFixed(4);
+}
+{
+  const cv = $('dsp-zplane');
+  cv.addEventListener('pointerdown', e => {
+    const rect = cv.getBoundingClientRect(), px = e.clientX - rect.left, py = e.clientY - rect.top;
+    const hit = zHit(px, py); dsp.sel = hit; cv.focus();
+    if (hit) { dsp.drag = true; cv.setPointerCapture(e.pointerId); zMoveSelected(...zFromPx(px, py), 8 / zGeom().R); }
+    else { $('dsp-sel-note').textContent = 'Selected: none'; dspDrawZplane(); }
+  });
+  cv.addEventListener('pointermove', e => { if (!dsp.drag || !dsp.sel) return; const rect = cv.getBoundingClientRect(); zMoveSelected(...zFromPx(e.clientX - rect.left, e.clientY - rect.top), 8 / zGeom().R); });
+  const end = () => { dsp.drag = false; };
+  cv.addEventListener('pointerup', end); cv.addEventListener('pointercancel', end);
+  cv.addEventListener('keydown', e => {
+    if (!dsp.sel) return;
+    const step = e.shiftKey ? 0.02 : 0.005; let dx = 0, dy = 0;
+    if (e.key === 'ArrowLeft') dx = -step; else if (e.key === 'ArrowRight') dx = step; else if (e.key === 'ArrowUp') dy = step; else if (e.key === 'ArrowDown') dy = -step; else return;
+    e.preventDefault();
+    const z = (dsp.sel.kind === 'pole' ? dsp.roots.poles : dsp.roots.zeros)[dsp.sel.idx];
+    let ny = z.im + dy; if (z.im !== 0 && Math.sign(ny) !== Math.sign(z.im)) ny = 0; // crossing the axis merges
+    zMoveSelected(z.re + dx, ny, 1e-12);
+  });
+  function zFromPx(px, py) { const g = zGeom(); return [(px - g.cx) / g.R, (g.cy - py) / g.R]; }
+}
+new ResizeObserver(() => dspRedrawAll()).observe($('panel-dsp'));
+
+/* ---------- audio ---------- */
+const audio = { ctx: null, mode: null, node: null, iir: { node: null, gain: null }, analyserIn: null, analyserOut: null, wet: null, dry: null, master: null, limiter: null,
+  src: null, srcKind: null, micStream: null, bypass: false, inData: null, outData: null, buffers: {}, iirTimer: 0, lastCoefs: null };
+function auMsg(text, cls) { const d = document.createElement('div'); d.className = 'msg ' + (cls || ''); d.textContent = text; $('au-msgs').appendChild(d); while ($('au-msgs').children.length > 4) $('au-msgs').firstChild.remove(); }
+function auClearMsgs() { $('au-msgs').innerHTML = ''; }
+function auState() { const b = $('au-state'); b.textContent = audio.ctx ? audio.ctx.state + ' @ ' + audio.ctx.sampleRate + ' Hz' + (audio.mode ? ' · ' + audio.mode : '') : 'no context'; b.className = 'badge ' + (audio.ctx && audio.ctx.state === 'running' ? 'ok' : audio.ctx ? 'warn' : ''); $('au-stop').disabled = !audio.ctx; $('au-start').textContent = audio.ctx && audio.ctx.state === 'suspended' ? 'Resume audio' : audio.ctx ? 'Running' : 'Start audio'; }
+async function startAudio() {
+  auClearMsgs();
+  if (audio.ctx) { try { await audio.ctx.resume(); } catch (e) { auMsg('Resume failed: ' + e.message, 'err'); } auState(); return; }
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) { auMsg('Web Audio API is not available in this browser.', 'err'); return; }
+  let ctx; try { ctx = new AC({ sampleRate: dsp.fs }); } catch (e) { ctx = new AC(); }
+  audio.ctx = ctx; ctx.addEventListener('statechange', auState);
+  if (ctx.sampleRate !== dsp.fs) auMsg('AudioContext runs at ' + ctx.sampleRate + ' Hz (selected fs was ' + dsp.fs + ' Hz). Coefficient math now uses the context rate.', 'warn');
+  dspSetFs(ctx.sampleRate, true);
+  audio.analyserIn = ctx.createAnalyser(); audio.analyserOut = ctx.createAnalyser();
+  for (const a of [audio.analyserIn, audio.analyserOut]) { a.fftSize = 4096; a.smoothingTimeConstant = 0.8; a.minDecibels = -100; a.maxDecibels = 0; }
+  audio.inData = new Float32Array(audio.analyserIn.frequencyBinCount); audio.outData = new Float32Array(audio.analyserOut.frequencyBinCount);
+  audio.wet = ctx.createGain(); audio.dry = ctx.createGain(); audio.master = ctx.createGain(); audio.limiter = ctx.createDynamicsCompressor();
+  audio.wet.gain.value = audio.bypass ? 0 : 1; audio.dry.gain.value = audio.bypass ? 1 : 0; audio.master.gain.value = +$('au-master').value;
+  const L = audio.limiter; L.threshold.value = -6; L.knee.value = 0; L.ratio.value = 20; L.attack.value = 0.003; L.release.value = 0.1;
+  try {
+    if (!ctx.audioWorklet) throw new Error('AudioWorklet unavailable');
+    const url = URL.createObjectURL(new Blob([WORKLET_SRC], { type: 'application/javascript' }));
+    try { await ctx.audioWorklet.addModule(url); } finally { URL.revokeObjectURL(url); }
+    audio.node = new AudioWorkletNode(ctx, 'biquad-df2t', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2] });
+    audio.mode = 'AudioWorklet';
+    audio.analyserIn.connect(audio.node); audio.node.connect(audio.wet);
+  } catch (e) {
+    audio.mode = 'IIRFilterNode fallback';
+    auMsg('AudioWorklet unavailable (' + e.message + '). Using IIRFilterNode recreated on change with a 30 ms crossfade.', 'warn');
+  }
+  audio.analyserIn.connect(audio.dry); audio.dry.connect(audio.analyserOut); audio.wet.connect(audio.analyserOut);
+  audio.analyserOut.connect(audio.master); audio.master.connect(audio.limiter); audio.limiter.connect(ctx.destination);
+  dspApplyCookbookIfNotCustom();
+  audioPushCoefs(dsp.lastStable || dsp.coefs, true);
+  try { await ctx.resume(); } catch (e) { auMsg('Context could not resume: ' + e.message, 'err'); }
+  await setSource($('au-source').value);
+  auState();
+}
+function dspApplyCookbookIfNotCustom() { if (!dsp.custom) dspApplyCookbook(); else dspApplyRoots(); }
+function audioPushCoefs(c, force) {
+  if (!audio.ctx || !c) return;
+  if (!force && audio.lastCoefs && coefArray(c).every((v, i) => v === audio.lastCoefs[i])) return;
+  audio.lastCoefs = coefArray(c);
+  if (audio.node) audio.node.port.postMessage({ type: 'coefs', c: audio.lastCoefs });
+  else if (audio.mode) { clearTimeout(audio.iirTimer); audio.iirTimer = setTimeout(() => iirSwap(c), 40); }
+}
+function iirSwap(c) {
+  const ctx = audio.ctx; if (!ctx) return;
+  let node; try { node = ctx.createIIRFilter([c.b0, c.b1, c.b2], [1, c.a1, c.a2]); } catch (e) { auMsg('IIRFilterNode rejected coefficients: ' + e.message, 'err'); return; }
+  const g = ctx.createGain(), now = ctx.currentTime; g.gain.setValueAtTime(0, now); g.gain.linearRampToValueAtTime(1, now + 0.03);
+  audio.analyserIn.connect(node); node.connect(g); g.connect(audio.wet);
+  const old = audio.iir;
+  if (old.node) { old.gain.gain.setValueAtTime(old.gain.gain.value, now); old.gain.gain.linearRampToValueAtTime(0, now + 0.03); setTimeout(() => { try { old.node.disconnect(); old.gain.disconnect(); } catch (e) {} }, 80); }
+  audio.iir = { node, gain: g };
+}
+function makeNoiseBuffer(kind, ctx) {
+  const fs = ctx.sampleRate, n = fs * 2, buf = ctx.createBuffer(1, n, fs), d = buf.getChannelData(0);
+  if (kind === 'white') { for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * 0.5; return buf; }
+  let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0, peak = 1e-9; // Paul Kellet refined pink filter
+  for (let i = 0; i < n; i++) {
+    const w = Math.random() * 2 - 1;
+    b0 = 0.99886 * b0 + w * 0.0555179; b1 = 0.99332 * b1 + w * 0.0750759; b2 = 0.96900 * b2 + w * 0.1538520; b3 = 0.86650 * b3 + w * 0.3104856; b4 = 0.55000 * b4 + w * 0.5329522; b5 = -0.7616 * b5 - w * 0.0168980;
+    d[i] = b0 + b1 + b2 + b3 + b4 + b5 + b6 + w * 0.5362; b6 = w * 0.115926; peak = Math.max(peak, Math.abs(d[i]));
+  }
+  for (let i = 0; i < n; i++) d[i] *= 0.5 / peak;
+  return buf;
+}
+function makeSweepBuffer(ctx, dur) {
+  const fs = ctx.sampleRate, n = Math.round(fs * dur), buf = ctx.createBuffer(1, n, fs), d = buf.getChannelData(0);
+  const f0 = 20, f1 = Math.min(20000, 0.45 * fs), k = Math.log(f1 / f0), fade = Math.round(0.01 * fs);
+  for (let i = 0; i < n; i++) { const t = i / fs, ph = 2 * Math.PI * f0 * dur / k * (Math.exp(t * k / dur) - 1); const env = Math.min(1, i / fade, (n - 1 - i) / fade); d[i] = 0.5 * env * Math.sin(ph); }
+  if (f1 < 20000) auMsg('Sweep capped at ' + f1.toFixed(0) + ' Hz for this sample rate.', 'warn');
+  return buf;
+}
+function stopSource() {
+  if (audio.src) { try { audio.src.stop(); } catch (e) {} try { audio.src.disconnect(); } catch (e) {} audio.src = null; }
+  if (audio.micStream) { audio.micStream.getTracks().forEach(t => t.stop()); audio.micStream = null; }
+  audio.srcKind = null;
+}
+async function setSource(kind) {
+  const ctx = audio.ctx; if (!ctx) return;
+  stopSource();
+  const warn = document.querySelector('#au-msgs .msg.feedback'); if (warn) warn.remove();
+  if (kind === 'mic') {
+    if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { auMsg('Microphone needs a secure context (https:// or localhost) and getUserMedia support.', 'err'); return; }
+    try {
+      audio.micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }, video: false });
+      if (!audio.ctx) { audio.micStream.getTracks().forEach(t => t.stop()); audio.micStream = null; return; }
+      audio.src = ctx.createMediaStreamSource(audio.micStream);
+      const w = document.createElement('div'); w.className = 'msg warn feedback'; w.textContent = '⚠ Microphone → speakers can feed back. Use headphones or keep the master gain low.'; $('au-msgs').appendChild(w);
+    } catch (e) {
+      const m = e.name === 'NotAllowedError' || e.name === 'SecurityError' ? 'Microphone permission denied.' : e.name === 'NotFoundError' || e.name === 'OverconstrainedError' ? 'No microphone device found.' : 'Microphone error: ' + e.message;
+      auMsg(m, 'err'); return;
+    }
+  } else {
+    const s = ctx.createBufferSource(); s.loop = true;
+    if (kind === 'sweep') { const dur = +$('au-sweep').value; if (!audio.buffers.sweep || audio.buffers.sweepDur !== dur || audio.buffers.sweepFs !== ctx.sampleRate) { audio.buffers.sweep = makeSweepBuffer(ctx, dur); audio.buffers.sweepDur = dur; audio.buffers.sweepFs = ctx.sampleRate; } s.buffer = audio.buffers.sweep; }
+    else { const key = kind + ctx.sampleRate; if (!audio.buffers[key]) audio.buffers[key] = makeNoiseBuffer(kind, ctx); s.buffer = audio.buffers[key]; }
+    s.start(); audio.src = s;
+  }
+  audio.srcKind = kind;
+  audio.src.connect(audio.analyserIn);
+}
+function stopAudio(reason) {
+  if (!audio.ctx) return;
+  stopSource(); clearTimeout(audio.iirTimer);
+  for (const n of [audio.node, audio.iir.node, audio.iir.gain, audio.analyserIn, audio.analyserOut, audio.wet, audio.dry, audio.master, audio.limiter]) { try { n && n.disconnect(); } catch (e) {} }
+  const ctx = audio.ctx;
+  audio.ctx = null; audio.node = null; audio.iir = { node: null, gain: null }; audio.mode = null; audio.lastCoefs = null; audio.buffers = {};
+  try { ctx.close(); } catch (e) {}
+  dspSetFs(dsp.fs, false);
+  auState();
+  if (reason) auMsg('Audio stopped (' + reason + ').');
+}
+$('au-start').addEventListener('click', () => { startAudio().catch(e => { auMsg('Audio start failed: ' + e.message, 'err'); auState(); }); });
+$('au-stop').addEventListener('click', () => stopAudio('stop'));
+$('au-source').addEventListener('change', e => { if (audio.ctx) setSource(e.target.value).catch(err => auMsg(err.message, 'err')); });
+$('au-sweep').addEventListener('input', e => { $('au-sweep-o').value = (+e.target.value).toFixed(1) + ' s'; if (audio.ctx && audio.srcKind === 'sweep') setSource('sweep'); });
+$('au-master').addEventListener('input', e => { $('au-master-o').value = (+e.target.value).toFixed(2); if (audio.master) audio.master.gain.setTargetAtTime(+e.target.value, audio.ctx.currentTime, 0.02); });
+$('au-bypass').addEventListener('click', () => {
+  audio.bypass = !audio.bypass; const b = $('au-bypass'); b.setAttribute('aria-pressed', audio.bypass); b.textContent = audio.bypass ? 'Bypass: ON (dry signal)' : 'Bypass: off (filter active)';
+  if (audio.ctx) { const t = audio.ctx.currentTime; audio.wet.gain.setTargetAtTime(audio.bypass ? 0 : 1, t, 0.01); audio.dry.gain.setTargetAtTime(audio.bypass ? 1 : 0, t, 0.01); }
+});
+window.addEventListener('pagehide', () => stopAudio());
+/* ---------- spectrum analyzer ---------- */
+function dspDrawSpectrum() {
+  const P = plotFrame($('dsp-spectrum'), 46, 12, 10, 20), { ctx } = P;
+  const fs = dsp.fs, fmin = 20, fmax = fs / 2;
+  const xf = drawLogGrid(P, fmin, fmax, true), yf = drawYGrid(P, -100, 0, 20, '');
+  ctx.fillStyle = '#8b98ab'; ctx.textAlign = 'left';
+  if (!audio.ctx || audio.ctx.state !== 'running') { ctx.fillText('Spectrum analyzer (fftSize 4096) — start audio to see input (dim) and filtered output (bright).', P.L + 4, P.T + 11); fcMarker(P, xf); return; }
+  audio.analyserIn.getFloatFrequencyData(audio.inData); audio.analyserOut.getFloatFrequencyData(audio.outData);
+  const binHz = audio.ctx.sampleRate / audio.analyserIn.fftSize, nb = audio.inData.length, cols = Math.max(2, Math.floor(P.pw));
+  const inv = invLogX(fmin, fmax, 0, cols), sample = (arr, f) => { const b = f / binHz, i = Math.floor(b); if (i >= nb - 1) return arr[nb - 1]; const t = b - i; return arr[i] * (1 - t) + arr[i + 1] * t; };
+  const inCol = new Float32Array(cols), outCol = new Float32Array(cols), fcol = new Float32Array(cols);
+  for (let i = 0; i < cols; i++) { const f = inv(i + 0.5); fcol[i] = f; inCol[i] = clamp(sample(audio.inData, f), -100, 0); outCol[i] = clamp(sample(audio.outData, f), -100, 0); }
+  const line = (arr, color, lw) => { ctx.strokeStyle = color; ctx.lineWidth = lw; ctx.beginPath(); for (let i = 0; i < cols; i++) { const x = P.L + i + 0.5, y = yf(arr[i]); if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); } ctx.stroke(); };
+  line(inCol, 'rgba(139,152,171,0.55)', 1); line(outCol, '#4cc9f0', 1.6);
+  if ($('au-showh').checked && dsp.lastStable) {
+    const sorted = Array.from(inCol).filter(v => v > -99).sort((a, b) => a - b), off = sorted.length ? sorted[sorted.length >> 1] : -60;
+    const hc = new Float32Array(cols); for (let i = 0; i < cols; i++) hc[i] = clamp(off + magDb(freqResponseAt(dsp.lastStable, 2 * Math.PI * fcol[i] / fs)), -100, 0);
+    ctx.setLineDash([5, 4]); line(hc, '#f9a03f', 1.2); ctx.setLineDash([]);
+    ctx.fillStyle = '#f9a03f'; ctx.fillText('|H| overlay (offset to input median ' + off.toFixed(0) + ' dB)', P.L + 4, P.T + 24);
+  }
+  ctx.fillStyle = '#8b98ab'; ctx.fillText('in (dim) / out (bright) · ' + audio.srcKind + (audio.bypass ? ' · BYPASS' : '') + ' · dBFS', P.L + 4, P.T + 11);
+  fcMarker(P, xf);
+}
+function dspFrame() {
+  dspRaf = 0;
+  if (activeModule !== 'dsp' || document.hidden) return;
+  dspDrawSpectrum();
+  dspRaf = requestAnimationFrame(dspFrame);
+}
+
+/* ---------- init ---------- */
+dspSetFs(48000, false); dspSetFc(1000); dspApplyCookbook();
+emReadInputs(); emSetTheta(45); emSetPol('TE');
+startLoops();
+if (/selftest/.test(location.search)) { const res = runSelfTests(); const pre = $('selftest-out'); pre.hidden = false; pre.textContent = res.lines.join('\n'); }
+</script>
+</main>
+</body>
+</html>
