@@ -495,8 +495,13 @@ function zMoveSelected(x, y, snapTol) {
 new ResizeObserver(() => dspRedrawAll()).observe($('panel-dsp'));
 
 /* ---------- audio ---------- */
-const audio = { ctx: null, mode: null, node: null, iir: { node: null, gain: null }, analyserIn: null, analyserOut: null, wet: null, dry: null, master: null, limiter: null,
+const audio = { ctx: null, mode: null, node: null, noise: null, iir: { node: null, gain: null }, analyserIn: null, analyserOut: null, wet: null, dry: null, master: null, shaper: null,
   src: null, srcKind: null, micStream: null, bypass: false, inData: null, outData: null, buffers: {}, iirTimer: 0, lastCoefs: null };
+function tanhCurve(points, ceiling) { // deterministic soft clip: y = ceiling · tanh(x / ceiling)
+  const c = new Float32Array(points);
+  for (let i = 0; i < points; i++) { const x = (i / (points - 1)) * 2 - 1; c[i] = ceiling * Math.tanh(x / ceiling); }
+  return c;
+}
 function auMsg(text, cls) { const d = document.createElement('div'); d.className = 'msg ' + (cls || ''); d.textContent = text; $('au-msgs').appendChild(d); while ($('au-msgs').children.length > 4) $('au-msgs').firstChild.remove(); }
 function auClearMsgs() { $('au-msgs').innerHTML = ''; }
 function auState() { const b = $('au-state'); b.textContent = audio.ctx ? audio.ctx.state + ' @ ' + audio.ctx.sampleRate + ' Hz' + (audio.mode ? ' · ' + audio.mode : '') : 'no context'; b.className = 'badge ' + (audio.ctx && audio.ctx.state === 'running' ? 'ok' : audio.ctx ? 'warn' : ''); $('au-stop').disabled = !audio.ctx; $('au-start').textContent = audio.ctx && audio.ctx.state === 'suspended' ? 'Resume audio' : audio.ctx ? 'Running' : 'Start audio'; }
@@ -512,9 +517,9 @@ async function startAudio() {
   audio.analyserIn = ctx.createAnalyser(); audio.analyserOut = ctx.createAnalyser();
   for (const a of [audio.analyserIn, audio.analyserOut]) { a.fftSize = 4096; a.smoothingTimeConstant = 0.8; a.minDecibels = -100; a.maxDecibels = 0; }
   audio.inData = new Float32Array(audio.analyserIn.frequencyBinCount); audio.outData = new Float32Array(audio.analyserOut.frequencyBinCount);
-  audio.wet = ctx.createGain(); audio.dry = ctx.createGain(); audio.master = ctx.createGain(); audio.limiter = ctx.createWaveShaper();
+  audio.wet = ctx.createGain(); audio.dry = ctx.createGain(); audio.master = ctx.createGain(); audio.shaper = ctx.createWaveShaper();
   audio.wet.gain.value = audio.bypass ? 0 : 1; audio.dry.gain.value = audio.bypass ? 1 : 0; audio.master.gain.value = +$('au-master').value;
-  { const L = audio.limiter, n = 4096, c = new Float32Array(n); for (let i = 0; i < n; i++) { const x = i / (n - 1) * 2 - 1; c[i] = 0.9 * Math.tanh(x / 0.9); } L.curve = c; L.oversample = '2x'; } // soft clip: unity small-signal gain, 0.9 ceiling
+  audio.shaper.curve = tanhCurve(4096, 0.9); audio.shaper.oversample = '2x'; // output ceiling 0.9, no makeup gain
   try {
     if (!ctx.audioWorklet) throw new Error('AudioWorklet unavailable');
     const url = URL.createObjectURL(new Blob([WORKLET_SRC], { type: 'application/javascript' }));
@@ -524,10 +529,10 @@ async function startAudio() {
     audio.analyserIn.connect(audio.node); audio.node.connect(audio.wet);
   } catch (e) {
     audio.mode = 'IIRFilterNode fallback';
-    auMsg('AudioWorklet unavailable (' + e.message + '). Using IIRFilterNode recreated on change with a 30 ms crossfade.', 'warn');
+    auMsg('AudioWorklet unavailable (' + e.message + '). Using IIRFilterNode recreated on change with a 30 ms crossfade; noise sources loop a 10 s buffer with a crossfaded seam.', 'warn');
   }
   audio.analyserIn.connect(audio.dry); audio.dry.connect(audio.analyserOut); audio.wet.connect(audio.analyserOut);
-  audio.analyserOut.connect(audio.master); audio.master.connect(audio.limiter); audio.limiter.connect(ctx.destination);
+  audio.analyserOut.connect(audio.master); audio.master.connect(audio.shaper); audio.shaper.connect(ctx.destination);
   dspApplyCookbookIfNotCustom();
   audioPushCoefs(dsp.lastStable || dsp.coefs, true);
   try { await ctx.resume(); } catch (e) { auMsg('Context could not resume: ' + e.message, 'err'); }
@@ -551,16 +556,14 @@ function iirSwap(c) {
   if (old.node) { old.gain.gain.setValueAtTime(old.gain.gain.value, now); old.gain.gain.linearRampToValueAtTime(0, now + 0.03); setTimeout(() => { try { old.node.disconnect(); old.gain.disconnect(); } catch (e) {} }, 80); }
   audio.iir = { node, gain: g };
 }
-function makeNoiseBuffer(kind, ctx) {
-  const fs = ctx.sampleRate, n = fs * 30, buf = ctx.createBuffer(1, n, fs), d = buf.getChannelData(0);
-  if (kind === 'white') { for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * 0.5; return buf; }
-  let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0, peak = 1e-9; // Paul Kellet refined pink filter
+function makeNoiseFallbackBuffer(kind, ctx) { // no-AudioWorklet fallback: 10 s loop with an equal-power crossfade at the seam
+  const fs = ctx.sampleRate, n = fs * 10, F = Math.round(0.05 * fs), buf = ctx.createBuffer(1, n, fs), d = buf.getChannelData(0);
+  const g = new Float32Array(n + F), pink = NOISE.makePinkFilter();
+  for (let i = 0; i < n + F; i++) g[i] = kind === 'pink' ? pink(Math.random() * 2 - 1) : NOISE.whiteSample(Math.random);
   for (let i = 0; i < n; i++) {
-    const w = Math.random() * 2 - 1;
-    b0 = 0.99886 * b0 + w * 0.0555179; b1 = 0.99332 * b1 + w * 0.0750759; b2 = 0.96900 * b2 + w * 0.1538520; b3 = 0.86650 * b3 + w * 0.3104856; b4 = 0.55000 * b4 + w * 0.5329522; b5 = -0.7616 * b5 - w * 0.0168980;
-    d[i] = b0 + b1 + b2 + b3 + b4 + b5 + b6 + w * 0.5362; b6 = w * 0.115926; peak = Math.max(peak, Math.abs(d[i]));
+    if (i < F) { const w = (i / F) * Math.PI / 2; d[i] = g[i] * Math.sin(w) + g[n + i] * Math.cos(w); } // tail fades out, head fades in
+    else d[i] = g[i];
   }
-  for (let i = 0; i < n; i++) d[i] *= 0.5 / peak;
   return buf;
 }
 function makeSweepBuffer(ctx, dur) {
@@ -572,6 +575,7 @@ function makeSweepBuffer(ctx, dur) {
 }
 function stopSource() {
   if (audio.src) { try { audio.src.stop(); } catch (e) {} try { audio.src.disconnect(); } catch (e) {} audio.src = null; }
+  if (audio.noise) { try { audio.noise.disconnect(); } catch (e) {} audio.noise.port.postMessage({ type: 'mode', mode: 'off' }); }
   if (audio.micStream) { audio.micStream.getTracks().forEach(t => t.stop()); audio.micStream = null; }
   audio.srcKind = null;
 }
@@ -593,7 +597,14 @@ async function setSource(kind) {
   } else {
     const s = ctx.createBufferSource(); s.loop = true;
     if (kind === 'sweep') { const dur = +$('au-sweep').value; if (!audio.buffers.sweep || audio.buffers.sweepDur !== dur || audio.buffers.sweepFs !== ctx.sampleRate) { audio.buffers.sweep = makeSweepBuffer(ctx, dur); audio.buffers.sweepDur = dur; audio.buffers.sweepFs = ctx.sampleRate; } s.buffer = audio.buffers.sweep; }
-    else { const key = kind + ctx.sampleRate; if (!audio.buffers[key]) audio.buffers[key] = makeNoiseBuffer(kind, ctx); s.buffer = audio.buffers[key]; }
+    else if (audio.node) { // AudioWorklet available: never-repeating generator
+      if (!audio.noise) audio.noise = new AudioWorkletNode(ctx, 'noise-gen', { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [1] });
+      audio.noise.port.postMessage({ type: 'mode', mode: kind });
+      audio.noise.connect(audio.analyserIn); audio.srcKind = kind; return;
+    } else {
+      auMsg('AudioWorklet unavailable: ' + kind + ' noise loops a 10 s buffer with a crossfaded seam.', 'warn');
+      const key = kind + ctx.sampleRate; if (!audio.buffers[key]) audio.buffers[key] = makeNoiseFallbackBuffer(kind, ctx); s.buffer = audio.buffers[key];
+    }
     s.start(); audio.src = s;
   }
   audio.srcKind = kind;
@@ -602,9 +613,9 @@ async function setSource(kind) {
 function stopAudio(reason) {
   if (!audio.ctx) return;
   stopSource(); clearTimeout(audio.iirTimer);
-  for (const n of [audio.node, audio.iir.node, audio.iir.gain, audio.analyserIn, audio.analyserOut, audio.wet, audio.dry, audio.master, audio.limiter]) { try { n && n.disconnect(); } catch (e) {} }
+  for (const n of [audio.node, audio.noise, audio.iir.node, audio.iir.gain, audio.analyserIn, audio.analyserOut, audio.wet, audio.dry, audio.master, audio.shaper]) { try { n && n.disconnect(); } catch (e) {} }
   const ctx = audio.ctx;
-  audio.ctx = null; audio.node = null; audio.iir = { node: null, gain: null }; audio.mode = null; audio.lastCoefs = null; audio.buffers = {};
+  audio.ctx = null; audio.node = null; audio.noise = null; audio.iir = { node: null, gain: null }; audio.mode = null; audio.lastCoefs = null; audio.buffers = {};
   try { ctx.close(); } catch (e) {}
   dspSetFs(dsp.fs, false);
   auState();

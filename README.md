@@ -43,5 +43,5 @@ prompts/              the prompts used to specify and generate this project
 ## Notes and limits
 
 - Audio (worklet/IIR chains, mic, tuner) cannot be exercised headlessly; those paths were checked for load/render and the pure math is unit tested.
-- v1 noise sources loop a 30 s buffer; the master output is a tanh soft clip (0.9 ceiling) rather than a compressor.
+- v1 noise comes from a never-repeating AudioWorklet generator (a 10 s crossfaded loop is used only when AudioWorklet is unavailable); the master output is a tanh soft clip (0.9 ceiling) rather than a compressor.
 - Machines models are teaching-level: induction motor has no separate core-loss branch, DC machine ignores armature reaction.

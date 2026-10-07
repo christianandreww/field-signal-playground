@@ -235,7 +235,23 @@ function df2tProcess(x, y, n, c, st) {
   for (let i = 0; i < n; i++) y[i] = df2tStep(x[i], c, st);
 }`;
 const DF2T = new Function(BIQUAD_CORE_SRC + '\nreturn { df2tStep, df2tProcess };')();
-const WORKLET_SRC = BIQUAD_CORE_SRC + `
+/* Noise generator core shared by the AudioWorklet, the no-worklet fallback buffer and the self-tests.
+   PINK_GAIN was calibrated with a Node simulation of 10 s at 48 kHz: the raw Kellet output has
+   RMS ≈ 1.77 and a 10 s peak ≈ 7.3–8.1, so 0.047 gives RMS ≈ 0.083 and peaks ≈ 0.38 (0.5 ≈ 6σ). */
+const NOISE_CORE_SRC = `
+const PINK_GAIN = 0.047;
+function whiteSample(rand) { return (rand() * 2 - 1) * 0.5; } // uniform in [-1, 1], 0.5 peak
+function makePinkFilter() { // Paul Kellet refined pink filter driven by uniform white noise, fixed output gain
+  let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+  return function (w) {
+    b0 = 0.99886 * b0 + w * 0.0555179; b1 = 0.99332 * b1 + w * 0.0750759; b2 = 0.96900 * b2 + w * 0.1538520;
+    b3 = 0.86650 * b3 + w * 0.3104856; b4 = 0.55000 * b4 + w * 0.5329522; b5 = -0.7616 * b5 - w * 0.0168980;
+    const out = b0 + b1 + b2 + b3 + b4 + b5 + b6 + w * 0.5362; b6 = w * 0.115926;
+    return out * PINK_GAIN;
+  };
+}`;
+const NOISE = new Function(NOISE_CORE_SRC + '\nreturn { whiteSample, makePinkFilter, PINK_GAIN };')();
+const WORKLET_SRC = BIQUAD_CORE_SRC + NOISE_CORE_SRC + `
 class BiquadDF2TProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
@@ -275,7 +291,24 @@ class BiquadDF2TProcessor extends AudioWorkletProcessor {
     return true;
   }
 }
-registerProcessor('biquad-df2t', BiquadDF2TProcessor);`;
+registerProcessor('biquad-df2t', BiquadDF2TProcessor);
+class NoiseProcessor extends AudioWorkletProcessor { // never-repeating white / pink noise source
+  constructor() {
+    super();
+    this.mode = 'off'; this.pink = makePinkFilter();
+    this.port.onmessage = (e) => { if (e.data && e.data.type === 'mode') this.mode = e.data.mode; };
+  }
+  process(inputs, outputs) {
+    const out = outputs[0]; if (!out || !out.length) return true;
+    const ch0 = out[0], n = ch0.length, rand = Math.random;
+    if (this.mode === 'white') for (let i = 0; i < n; i++) ch0[i] = whiteSample(rand);
+    else if (this.mode === 'pink') for (let i = 0; i < n; i++) ch0[i] = this.pink(rand() * 2 - 1);
+    else ch0.fill(0);
+    for (let c = 1; c < out.length; c++) out[c].set(ch0);
+    return true;
+  }
+}
+registerProcessor('noise-gen', NoiseProcessor);`;
 
 const FILTER_NAMES = { lp: 'Lowpass', hp: 'Highpass', bp: 'Bandpass (0 dB peak)', notch: 'Notch', peak: 'Peaking EQ' };
 function rbjCoefs(type, fc, fs, Q, gainDb) {
@@ -473,6 +506,23 @@ function runV1Tests() {
     const r2 = poleRadii(coefsFromRoots(roots));
     const ok = r1.every(x => x <= POLE_RMAX + 1e-12) && r2.every(x => x <= POLE_RMAX + 1e-12);
     check('DSP10 dragging a pole to |p|≥1 never yields |p|>0.9999', ok, 'radii: ' + r1.map(x => x.toFixed(6)).join(', ') + ' / ' + r2.map(x => x.toFixed(6)).join(', ')); }
+  // 14: pink noise generator — 10 s simulation, peak < 0.5 and ≈ −3 dB/octave between 100 Hz and 10 kHz
+  { const fs = 48000, N = fs * 10, pink = NOISE.makePinkFilter(), x = new Float32Array(N);
+    let peak = 0, ss = 0;
+    for (let i = 0; i < N; i++) { const v = pink(Math.random() * 2 - 1); x[i] = v; ss += v * v; const a = Math.abs(v); if (a > peak) peak = a; }
+    const M = 4096, half = M / 2, psd = new Float64Array(half), win = new Float64Array(M);
+    for (let i = 0; i < M; i++) win[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / M);
+    const fft = (re, im) => { // in-place radix-2
+      for (let i = 1, j = 0; i < M; i++) { let bit = M >> 1; for (; j & bit; bit >>= 1) j ^= bit; j ^= bit; if (i < j) { let t = re[i]; re[i] = re[j]; re[j] = t; t = im[i]; im[i] = im[j]; im[j] = t; } }
+      for (let len = 2; len <= M; len <<= 1) { const ang = -2 * Math.PI / len, wr = Math.cos(ang), wi = Math.sin(ang);
+        for (let i = 0; i < M; i += len) { let cr = 1, ci = 0; for (let k = 0; k < len / 2; k++) { const a = i + k, b = a + len / 2; const tr = re[b] * cr - im[b] * ci, ti = re[b] * ci + im[b] * cr; re[b] = re[a] - tr; im[b] = im[a] - ti; re[a] += tr; im[a] += ti; const nr = cr * wr - ci * wi; ci = cr * wi + ci * wr; cr = nr; } } } };
+    const re = new Float64Array(M), im = new Float64Array(M); let segs = 0;
+    for (let s0 = 0; s0 + M <= N; s0 += M) { for (let i = 0; i < M; i++) { re[i] = x[s0 + i] * win[i]; im[i] = 0; } fft(re, im); for (let k = 0; k < half; k++) psd[k] += re[k] * re[k] + im[k] * im[k]; segs++; }
+    let sx = 0, sy = 0, sxx = 0, sxy = 0, n = 0;
+    for (let k = 1; k < half; k++) { const f = k * fs / M; if (f < 100 || f > 10000) continue; const X = Math.log2(f), Y = 10 * Math.log10(psd[k] / segs); sx += X; sy += Y; sxx += X * X; sxy += X * Y; n++; }
+    const slope = (n * sxy - sx * sy) / (n * sxx - sx * sx);
+    check('NOISE14 pink generator: 10 s peak < 0.5 and slope −3 ± 1 dB/octave (100 Hz–10 kHz)', peak < 0.5 && Math.abs(slope + 3) <= 1,
+      'peak=' + peak.toFixed(3) + ' rms=' + Math.sqrt(ss / N).toFixed(3) + ' slope=' + slope.toFixed(2) + ' dB/oct over ' + segs + ' segments'); }
   const passed = results.filter(r => r.ok).length;
   const summary = passed + '/' + results.length + ' checks passed';
   lines.push(summary); console.log(summary);
