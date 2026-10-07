@@ -402,7 +402,7 @@
     const niceStep = raw => { const p = Math.pow(10, Math.floor(Math.log10(raw))), f = raw / p; return (f < 1.5 ? 1 : f < 3.5 ? 2 : f < 7.5 ? 5 : 10) * p; };
     ctx.strokeStyle = COL.grid; ctx.fillStyle = COL.text; ctx.textAlign = 'right';
     const ystep = ymax > 1.2 ? niceStep(ymax / 4) : 0.25;                      // at most ~8 grid lines whatever the range
-    for (let v = 0; v <= ymax + 1e-9; v += ystep) { ctx.beginPath(); ctx.moveTo(L, Y(v)); ctx.lineTo(L + pw, Y(v)); ctx.stroke(); ctx.fillText(FSP.fmtNum(v, 3), L - 4, Y(v)); }
+    for (let v = 0; v <= ymax + 1e-9; v += ystep) { ctx.beginPath(); ctx.moveTo(L, Y(v)); ctx.lineTo(L + pw, Y(v)); ctx.stroke(); ctx.fillText(v >= 1e4 ? v.toExponential(1) : FSP.fmtNum(v, 3), L - 4, Y(v)); }
     ctx.textAlign = 'center';
     const xstep = dmax > 1.6 ? niceStep(dmax / 8) : dmax > 0.8 ? 0.25 : 0.125;
     for (let d = 0; d <= dmax + 1e-9; d += xstep) { ctx.beginPath(); ctx.moveTo(X(d), T); ctx.lineTo(X(d), T + ph); ctx.stroke(); ctx.fillText(FSP.fmtNum(d, 4), X(d), T + ph + 12); }
