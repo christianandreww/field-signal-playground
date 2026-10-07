@@ -7,7 +7,7 @@ A single-file, zero-dependency interactive engineering simulation web app with t
 
 ## Status
 
-The prompt is ready. `index.html` has not been generated yet.
+`index.html` is generated and committed. Open it directly in a browser; run `runSelfTests()` in the console (or load `index.html?selftest=1`) to print the acceptance checks. All 13 checks pass in Chromium and in Node (core math only).
 
 ## Repo layout
 
