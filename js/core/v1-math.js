@@ -386,6 +386,17 @@ function fmtSI(v, unit, digits) {
 }
 function fmtPolar(c) { return c && c.isFinite() ? c.abs().toFixed(4) + ' ∠ ' + argDeg(c).toFixed(2) + '°' : '—'; }
 function fmtComplexN(c) { return c && c.isFinite() ? c.re.toFixed(3) + (c.im < 0 ? ' − j' : ' + j') + Math.abs(c.im).toFixed(3) : '—'; }
+
+/* ---------- skin depth & surface impedance (v2) ---------- */
+// Exact: δ = 1/Im(k) with k = (ω/c0)·n_c (|Im| of the complex wavenumber). Good-conductor: δ = √(2/(ωμσ)), Zs = (1+j)/(σδ).
+function skinDepth(m) {
+  if (!(m.sigma > 0)) return null;
+  const mu = m.mr * PHYS.MU0, kIm = (m.omega / PHYS.C0) * Math.abs(m.nc.im);
+  const exact = kIm > 0 ? 1 / kIm : Infinity, approx = Math.sqrt(2 / (m.omega * mu * m.sigma));
+  const Zs = C(1, 1).scale(1 / (m.sigma * approx));
+  return { exact, approx, ratio: exact / approx, Zs, eta: m.eta, goodConductor: m.sigma / (m.omega * PHYS.EPS0 * m.er) > 10 };
+}
+
 /* ---------- acceptance self-tests (console: runSelfTests()) ---------- */
 function runV1Tests() {
   const lines = [], results = [];
@@ -467,3 +478,14 @@ function runV1Tests() {
   lines.push(summary); console.log(summary);
   return { passed, failed: results.length - passed, results, lines };
 }
+
+if (typeof FSP !== 'undefined') FSP.registerTests('em-v2', t => {
+  const cu = makeMedium(1, 1, 5.8e7, 1e6), sd = skinDepth(cu);
+  t.check('copper σ=5.8e7 at 1 MHz: δ = 66.09 µm (±0.1%)', t.rel(sd.exact, 66.09e-6, 1e-3) && t.rel(sd.approx, 66.09e-6, 1e-3), (sd.exact * 1e6).toFixed(3) + ' µm exact, ' + (sd.approx * 1e6).toFixed(3) + ' approx');
+  t.check('exact vs good-conductor δ agree within 1e-6 for copper', Math.abs(sd.ratio - 1) < 1e-6, 'ratio-1=' + (sd.ratio - 1).toExponential(2));
+  t.check('|Zs| = √(ωμ/σ) and matches |η| within 1e-6', t.rel(sd.Zs.abs(), Math.sqrt(cu.omega * PHYS.MU0 / 5.8e7), 1e-12) && t.rel(sd.Zs.abs(), sd.eta.abs(), 1e-6), '|Zs|=' + sd.Zs.abs().toExponential(4) + ' Ω');
+  t.check('skinDepth is null for lossless media', skinDepth(makeMedium(2.25, 1, 0, 1e9)) === null);
+  let worst = 0; const rnd = FSP.prng.mulberry32(7);
+  for (let i = 0; i < 20; i++) { const th = rnd() * 89, pol = rnd() < 0.5 ? 'TE' : 'TM', an = emAnalyze(th, pol, makeMedium(1 + rnd() * 3, 1, 0, 1e9), makeMedium(1 + rnd() * 3, 1, 0, 1e9)); worst = Math.max(worst, Math.abs(an.R + an.T - 1)); }
+  t.check('lossless interface: |R+T−1| < 1e-12 at 20 random angles/polarizations', worst < 1e-12, 'worst=' + worst.toExponential(2));
+});

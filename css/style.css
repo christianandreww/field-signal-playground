@@ -71,3 +71,5 @@ details.theory p,details.theory li{font-size:13px;color:#cfd8e3}
 canvas.plot{background:var(--panel2);border:1px solid var(--border);border-radius:8px}
 .msg.bad{color:var(--bad)}
 .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px}
+input[type=text]{background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:3px 5px;font:12px var(--mono);min-width:0}
+@media (max-width:700px){header{position:static;flex-wrap:wrap}.tabs{flex-wrap:nowrap;overflow-x:auto;width:100%;padding-bottom:4px}.tabs [role=tab]{white-space:nowrap;flex:0 0 auto}}

@@ -1,35 +1,47 @@
 # Field & Signal Playground
 
-A single-file, zero-dependency interactive engineering simulation web app with two modules:
+A zero-dependency, build-free engineering sandbox that runs by double-clicking `index.html` (works from `file://`). Nine tabs, all with a "Show working" panel and shareable URL state ("Copy link").
 
-1. **EM Wave & Dielectric Boundary Simulator**: Fresnel coefficients, Brewster and critical angles, total internal reflection with evanescent decay, and Poynting vector visualization for plane waves at a planar interface.
-2. **DSP & Biquad Filter Lab**: RBJ cookbook biquads (LP/HP/BP/Notch/Peaking), an interactive z-plane pole-zero editor, Bode and impulse-response plots, and a Web Audio harness with a live FFT analyzer.
+| Tab | What it does |
+|---|---|
+| EM Wave & Boundary | Oblique incidence on a planar interface: Fresnel (impedance form, lossy/magnetic media), TIR, Brewster, live field map, Poynting flux, skin depth and surface impedance |
+| DSP & Biquad Lab | RBJ biquads, draggable pole-zero editor, Bode/impulse, live audio through an AudioWorklet |
+| Convolution & Spectra | Flip-and-slide convolution, FFT, window explorer (sidelobe/ENBW/coherent gain), spectral leakage |
+| Transmission Lines | Smith chart, VSWR/return loss, Zin along the line, stub and quarter-wave matching |
+| Butterworth / Chebyshev | Order 1–10 LP/HP/BP/BS as second-order-section cascades (bilinear with prewarping), s/z-plane views, audio path |
+| Audio Tools | YIN pitch tuner, spectrogram, tone generator, audio-file player |
+| Comms & Networks | BPSK/QPSK/16-QAM BER Monte Carlo vs theory, raised-cosine eye diagram, Shannon calculator, CIDR/subnet calculator |
+| Magnetics & Transformer | Magnetic circuit with air gap and B–H saturation; transformer equivalent circuit, regulation, efficiency |
+| Rotating Machines | Induction motor torque–speed, DC machine, three-phase rotating field |
 
-## Status
+## Run
 
-`index.html` is generated and committed. Open it directly in a browser; run `runSelfTests()` in the console (or load `index.html?selftest=1`) to print the acceptance checks. All 13 checks pass in Chromium and in Node (core math only).
+- Open `index.html` in a browser. No server, no install.
+- Microphone input needs `https` or `localhost` (browser rule); everything else works from `file://`.
 
-## Repo layout
+## Test
 
 ```
-.
-├── README.md
-├── .gitignore
-├── prompts/
-│   └── field-signal-playground.prompt.md   # the full spec to give the model
-└── index.html                              # generated output goes here
+node tests/run.js        # all math/self-tests, no browser needed (Node 18+)
+node tests/browser.js    # optional: headless smoke test of every tab (needs Playwright + Chromium)
 ```
 
-## Workflow
+In the page, append `?selftest` to the URL (or run `runSelfTests()` in the console) to run the same suite.
 
-1. Paste `prompts/field-signal-playground.prompt.md` into Claude Fable.
-2. Save the single code block it returns as `index.html` in the repo root.
-3. Open `index.html` in a browser (no build step, no server needed for Module 1; use `python -m http.server` or `localhost` if the microphone is blocked on `file://`).
-4. Open the browser console and run `runSelfTests()` to check the acceptance tests.
-5. Commit the result.
+## Layout
 
-## Notes
+```
+index.html            shell + script tags (order matters; no ES modules, so file:// works)
+css/style.css
+js/core/              fsp.js (registry, URL state, UI helpers), prng.js, fft.js, v1-math.js (EM + biquad core, v1 tests)
+js/modules/           one file per tab: pure math in FSP.math.<name>, UI in init(), tests via FSP.registerTests
+js/v1-ui.js           EM and DSP tab UI, tab switching, state restore
+tests/                run.js (Node), browser.js (Playwright smoke)
+prompts/              the prompts used to specify and generate this project
+```
 
-- Web Audio, AudioWorklet and `getUserMedia` need a secure context (`https://` or `localhost`) in most browsers.
-- The audio chain defaults to a low master gain and a limiter. Keep volume low when testing with white noise and high-Q peaking filters.
-- If the model's output truncates, ask it to continue from the exact last line rather than regenerating.
+## Notes and limits
+
+- Audio (worklet/IIR chains, mic, tuner) cannot be exercised headlessly; those paths were checked for load/render and the pure math is unit tested.
+- v1 noise sources loop a 30 s buffer; the master output is a tanh soft clip (0.9 ceiling) rather than a compressor.
+- Machines models are teaching-level: induction motor has no separate core-loss branch, DC machine ignores armature reaction.

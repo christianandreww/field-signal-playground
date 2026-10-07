@@ -149,6 +149,7 @@ function emUpdateHud() {
     ['critical θc', an.thetaC === null ? 'N/A' : fmtDeg(an.thetaC, 3)],
     [an.evanescent ? 'evanescent decay δ' : 'decay length δ', Number.isFinite(an.delta) ? fmtNum(an.delta, 4) + ' λ0 = ' + fmtSI(an.deltaPhys, 'm') : '— (propagating)'],
     ['λ0 / λ1 / λ2', fmtSI(an.lambda0, 'm') + ' / ' + fmtSI(an.lambda0 / Math.max(m1.nc.re, 1e-300), 'm') + ' / ' + fmtSI(an.lambda0 / Math.max(m2.nc.re, 1e-300), 'm')],
+    ...(() => { const sd = skinDepth(m2); return sd ? [['skin depth δ (medium 2)', fmtSI(sd.exact, 'm') + '  (good-conductor ' + fmtSI(sd.approx, 'm') + ', ratio ' + fmtNum(sd.ratio, 6) + ')'], ['surface impedance Zs', fmtComplexN(sd.Zs) + ' Ω  (= (1+j)/(σδ); |η2| = ' + fmtNum(sd.eta.abs(), 4) + ' Ω)']] : []; })(),
     ['η1 / η2', fmtPolar(m1.eta).replace(/^([\d.]+)/, (s, a) => (+a).toFixed(1)) + ' Ω / ' + fmtPolar(m2.eta).replace(/^([\d.]+)/, (s, a) => (+a).toFixed(1)) + ' Ω'],
     ['ωt', (em.phase * 180 / Math.PI).toFixed(0) + '°' + (em.playing ? '' : ' (paused)')]
   ];
@@ -511,9 +512,9 @@ async function startAudio() {
   audio.analyserIn = ctx.createAnalyser(); audio.analyserOut = ctx.createAnalyser();
   for (const a of [audio.analyserIn, audio.analyserOut]) { a.fftSize = 4096; a.smoothingTimeConstant = 0.8; a.minDecibels = -100; a.maxDecibels = 0; }
   audio.inData = new Float32Array(audio.analyserIn.frequencyBinCount); audio.outData = new Float32Array(audio.analyserOut.frequencyBinCount);
-  audio.wet = ctx.createGain(); audio.dry = ctx.createGain(); audio.master = ctx.createGain(); audio.limiter = ctx.createDynamicsCompressor();
+  audio.wet = ctx.createGain(); audio.dry = ctx.createGain(); audio.master = ctx.createGain(); audio.limiter = ctx.createWaveShaper();
   audio.wet.gain.value = audio.bypass ? 0 : 1; audio.dry.gain.value = audio.bypass ? 1 : 0; audio.master.gain.value = +$('au-master').value;
-  const L = audio.limiter; L.threshold.value = -6; L.knee.value = 0; L.ratio.value = 20; L.attack.value = 0.003; L.release.value = 0.1;
+  { const L = audio.limiter, n = 4096, c = new Float32Array(n); for (let i = 0; i < n; i++) { const x = i / (n - 1) * 2 - 1; c[i] = 0.9 * Math.tanh(x / 0.9); } L.curve = c; L.oversample = '2x'; } // soft clip: unity small-signal gain, 0.9 ceiling
   try {
     if (!ctx.audioWorklet) throw new Error('AudioWorklet unavailable');
     const url = URL.createObjectURL(new Blob([WORKLET_SRC], { type: 'application/javascript' }));
@@ -551,7 +552,7 @@ function iirSwap(c) {
   audio.iir = { node, gain: g };
 }
 function makeNoiseBuffer(kind, ctx) {
-  const fs = ctx.sampleRate, n = fs * 2, buf = ctx.createBuffer(1, n, fs), d = buf.getChannelData(0);
+  const fs = ctx.sampleRate, n = fs * 30, buf = ctx.createBuffer(1, n, fs), d = buf.getChannelData(0);
   if (kind === 'white') { for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * 0.5; return buf; }
   let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0, peak = 1e-9; // Paul Kellet refined pink filter
   for (let i = 0; i < n; i++) {
