@@ -1,6 +1,6 @@
 # Field & Signal Playground
 
-A zero-dependency, build-free engineering sandbox that runs by double-clicking `index.html` (works from `file://`). Nine tabs, all with a "Show working" panel and shareable URL state ("Copy link").
+A zero-dependency, build-free engineering sandbox that runs by double-clicking `index.html` (works from `file://`). Thirteen tools grouped by subject (Electromagnetics, Signals & DSP, Communications, Machines), all with a "Show working" panel and shareable URL state ("Copy link").
 
 | Tab | What it does |
 |---|---|
@@ -10,9 +10,13 @@ A zero-dependency, build-free engineering sandbox that runs by double-clicking `
 | Transmission Lines | Smith chart, VSWR/return loss, Zin along the line, stub and quarter-wave matching |
 | Butterworth / Chebyshev | Order 1–10 LP/HP/BP/BS as second-order-section cascades (bilinear with prewarping), s/z-plane views, audio path |
 | Audio Tools | YIN pitch tuner, spectrogram, tone generator, audio-file player |
-| Comms & Networks | BPSK/QPSK/16-QAM BER Monte Carlo vs theory, raised-cosine eye diagram, Shannon calculator, CIDR/subnet calculator |
+| Comms & Networks | BPSK/QPSK/16-QAM BER Monte Carlo vs theory, raised-cosine eye diagram, Shannon calculator, CIDR/subnet and VLSM calculator |
 | Magnetics & Transformer | Magnetic circuit with air gap and B–H saturation; transformer equivalent circuit, regulation, efficiency |
-| Rotating Machines | Induction motor torque–speed, DC machine, three-phase rotating field |
+| Rotating Machines | Induction motor torque–speed and speed control (voltage, rotor resistance, V/f), DC machine incl. compound, three-phase rotating field |
+| Networks & Protocols | Line coding (NRZ, NRZ-I, AMI, Manchester, diff. Manchester, B8ZS, HDB3), delays and store-and-forward, statistical multiplexing, ALOHA and CSMA/CD, ARQ efficiency and TCP congestion control, Internet checksum, CRC and parity (IE3017) |
+| z-Transform & FIR Design | Sampling and aliasing, difference equations, pole-zero, inverse z by partial fractions with ROC, window and frequency-sampling FIR design, filter structures with block diagrams, DFT properties and quantisation (IE3014) |
+| Fields & Polarization | Charge distributions (closed form vs numeric), Biot–Savart and Ampère, Faraday and displacement current, plane waves and polarization, normal incidence and standing waves (EE3101) |
+| Transformers & Actuators | Three-limb magnetic circuits with a B–H table, inductance, energy and force, core losses, autotransformers, three-phase transformer connections, all-day efficiency (EE2005) |
 
 ## Run
 

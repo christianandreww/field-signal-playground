@@ -72,4 +72,39 @@ canvas.plot{background:var(--panel2);border:1px solid var(--border);border-radiu
 .msg.bad{color:var(--bad)}
 .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px}
 input[type=text]{background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:3px 5px;font:12px var(--mono);min-width:0}
-@media (max-width:700px){header{position:static;flex-wrap:wrap}.tabs{flex-wrap:nowrap;overflow-x:auto;width:100%;padding-bottom:4px}.tabs [role=tab]{white-space:nowrap;flex:0 0 auto}}
+
+
+/* ---------- navigation: subject bar + tabs of that subject (wide) / picker (narrow) ---------- */
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+header{padding:8px 16px;gap:8px 16px}
+.group-bar{display:flex;gap:4px;padding:3px;background:var(--panel2);border:1px solid var(--border);border-radius:10px}
+.group-btn{background:transparent;color:var(--muted);border:0;border-radius:7px;padding:5px 11px;font:inherit;font-size:13px;cursor:pointer;white-space:nowrap}
+.group-btn:hover{color:var(--text)}
+.group-btn[aria-pressed=true]{background:var(--accent);color:#0b0f17;font-weight:600}
+.group-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.copy-link{margin-left:auto;background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:6px 12px;font:inherit;cursor:pointer}
+.copy-link:hover{border-color:var(--accent)}
+.tabs{display:block;width:100%;order:3}
+.tab-group{display:flex;flex-wrap:wrap;gap:2px}
+.tabs [role=tab]{white-space:nowrap;padding:5px 12px}
+[role=tab]:hover{color:var(--text)}
+.tab-picker-wrap{display:none}
+#tab-picker{width:100%;font-size:16px;padding:9px 10px;border-radius:10px;background:var(--panel);color:var(--text);border:1px solid var(--accent)}
+main{max-width:1600px;margin:0 auto}
+@media (max-width:900px){
+  header{gap:8px 10px;padding:8px 12px}
+  h1{font-size:15px}
+  .tabs,.group-bar{display:none}
+  .tab-picker-wrap{display:block;order:3;flex:1 1 100%}
+  .copy-link{padding:5px 10px;font-size:13px}
+  main{padding:10px 12px 40px}
+}
+@media (max-width:480px){ h1 small{display:none} }
+/* touch devices: bigger targets, and 16px inputs so iOS does not zoom on focus */
+@media (pointer:coarse){
+  input[type=number],input[type=text],select,textarea{font-size:16px}
+  button,.seg-btn{min-height:38px}
+  input[type=range]{height:28px}
+}
+select,input[type=text],textarea{max-width:100%;min-width:0}
+.ctl>*{min-width:0}
