@@ -132,10 +132,110 @@
     },
   };
 
+  /* ======================= 8c+: induction-motor speed control (pure math) ======================= */
+  // Every method returns a modified parameter set p2 for the SAME torque function IM.torqueTh / IM.thevenin.
+  //  (a) stator voltage control : VL -> k·VL.   Vth ∝ V, so T(s) -> k²·T(s) at every slip; sm unchanged.
+  //  (b) added rotor resistance : R2' -> R2' + Rext (Rext referred to the stator, = Rext_actual/(turns ratio)²).
+  //      K = |Zth + jX2'| does not contain R2', so sm = R2'/K scales with R2' and Tmax is unchanged;
+  //      the whole curve is the old one with s replaced by s·R2'/(R2'+Rext).
+  //  (c) constant V/f : f -> a·f (a = f'/f), reactances X1, X2', Xm -> a·X, V -> V·(a + b(1−a)) for a<1 (b = low-frequency boost
+  //      fraction, b = 0: V ∝ f), constant V above base frequency (a>1, field weakening).  Rth ≈ R1·(Xm/(X1+Xm))² does NOT scale with a.
+  //      Exactly constant Tmax needs R1 = 0 (then Rth = 0, Zth = jXth with Xth ∝ a):
+  //        Tmax = 3 Vth² / (2 ωs' (Xth + X2')),  Vth = V'·Xm/(X1+Xm) ∝ V' ∝ a,  ωs' ∝ a,  Xth+X2' ∝ a   =>   Tmax ∝ a²/(a·a) = const.
+  //      and sm = R2'/(Xth+X2') ∝ 1/a, so the speed drop ns'·sm = ns·sm0 is the same for every frequency.
+  const SC = {
+    vfFrac: (a, b) => (a >= 1 ? 1 : a + (b || 0) * (1 - a)),
+    control(p, mode, o) {
+      if (mode === 'volt') {
+        if (!(o.k > 0) || !(o.k <= 1.5)) return { ok: false, msg: 'Voltage ratio V/V0 must be in (0, 1.5].' };
+        return { ok: true, p2: Object.assign({}, p, { VL: p.VL * o.k }), a: 1, vfrac: o.k };
+      }
+      if (mode === 'rot') {
+        if (!(o.Rext >= 0) || !fin(o.Rext)) return { ok: false, msg: 'Added rotor resistance must be ≥ 0.' };
+        return { ok: true, p2: Object.assign({}, p, { R2: p.R2 + o.Rext }), a: 1, vfrac: 1 };
+      }
+      if (mode === 'vf') {
+        if (!(o.f > 0) || !fin(o.f)) return { ok: false, msg: 'Frequency must be > 0.' };
+        if (!(o.boost >= 0) || !(o.boost <= 1)) return { ok: false, msg: 'Boost must be between 0 and 100 % of rated voltage.' };
+        const a = o.f / p.f, vfrac = SC.vfFrac(a, o.boost);
+        return { ok: true, p2: Object.assign({}, p, { VL: p.VL * vfrac, f: o.f, X1: p.X1 * a, X2: p.X2 * a, Xm: p.Xm * a }), a, vfrac };
+      }
+      return { ok: false, msg: 'Unknown control method.' };
+    },
+    // load torque at speed n (rpm): load = {type:'const'|'fan', T (N·m at n_ref), n (rpm, n_ref)}
+    loadTorque(load, n) { return load.type === 'fan' ? load.T * (n / load.n) * (n / load.n) : load.T; },
+    // Stable operating point: T(s) = T_L(ns(1−s)) on 0 < s <= sm.  T(s) increases and T_L(n(s)) does not increase with s there,
+    // so g(s) = T − T_L is strictly increasing and the root is unique (bisection).
+    operatingPoint(p, load) {
+      if (!(load.T >= 0) || !fin(load.T)) return { ok: false, msg: 'Load torque must be ≥ 0.' };
+      if (load.type === 'fan' && !(load.n > 0)) return { ok: false, msg: 'Reference speed must be > 0.' };
+      const th = IM.thevenin(p), bd = IM.breakdown(p, th), ns = IM.syncRpm(p.f, p.poles);
+      if (!(bd.Tmax > 0) || !fin(bd.Tmax) || !(bd.sm > 0)) return { ok: false, msg: 'Parameters give no valid torque curve.' };
+      const g = s => IM.torqueTh(p, s, th) - SC.loadTorque(load, ns * (1 - s));
+      const Tstart = IM.torqueTh(p, 1, th), TLstart = SC.loadTorque(load, 0);
+      const res = { th, bd, ns, Tstart, TLstart, canStart: Tstart > TLstart };
+      if (load.T === 0) return Object.assign(res, { ok: true, s: 0, n: ns, T: 0, TL: 0 });
+      if (g(bd.sm) < 0) return Object.assign(res, { ok: false, stalled: true, msg: 'Load exceeds the breakdown torque at this setting: no stable operating point (motor stalls).' });
+      let lo = 0, hi = bd.sm;
+      for (let i = 0; i < 200; i++) { const m = 0.5 * (lo + hi); if (g(m) < 0) lo = m; else hi = m; if (hi - lo < 1e-15) break; }
+      const s = 0.5 * (lo + hi), n = ns * (1 - s);
+      return Object.assign(res, { ok: true, s, n, T: IM.torqueTh(p, s, th), TL: SC.loadTorque(load, n) });
+    },
+  };
+
+  /* ======================= 8d+: compound DC machine ======================= */
+  // Linear flux per ampere-turn (motor) or Fröhlich saturation (generator).  Field MMF in shunt-field-ampere units:
+  //   I_fe = I_f + σ (Ns/Nf) I_s ,  σ = +1 cumulative, −1 differential,   K = Laf·I_fe  (/(1+|I_fe|/Isat) when Isat > 0)
+  //   E = K ω,  Tem = K Ia.
+  // long shunt : shunt field across the supply/load terminals, series field in series with the armature   (Is = Ia)
+  // short shunt: shunt field across the armature only, series field in the line                              (Is = IL)
+  // p: {V, Ra, Rf, Rs, Nf, Ns, Laf, Vb, conn:'long'|'short', comp:'cum'|'diff', Isat (0 = linear), w (generator speed, rad/s)}
+  const CD = {
+    sigma: p => (p.comp === 'diff' ? -1 : 1),
+    kOf(p, Ife) { return p.Isat > 0 && fin(p.Isat) ? p.Laf * Ife / (1 + Math.abs(Ife) / p.Isat) : p.Laf * Ife; },
+    motor(p, Ia) {
+      const r = p.Ns / p.Nf, sg = CD.sigma(p), vb = Ia > 0 ? p.Vb : 0;
+      let If, IL, Is, Va, Ea;
+      if (p.conn === 'short') { If = (p.V - Ia * p.Rs) / (p.Rf + p.Rs); IL = Ia + If; Is = IL; Va = p.V - IL * p.Rs; Ea = Va - vb - Ia * p.Ra; }
+      else { If = p.V / p.Rf; IL = Ia + If; Is = Ia; Va = p.V; Ea = p.V - vb - Ia * (p.Ra + p.Rs); }
+      const Ife = If + sg * r * Is, K = CD.kOf(p, Ife), okK = K > 1e-9;
+      const w = okK ? Ea / K : NaN;
+      return { Ia, If, Is, IL, Va, Ea, Ife, K, w, rpm: fin(w) ? w * 30 / PI : NaN, Tem: K * Ia, Pem: Ea * Ia, Pin: p.V * IL, runaway: !okK && Ea > 0, fluxRev: Ife <= 0, stalled: Ea < 0, Vb: vb };
+    },
+    // residual h(Vt) = E produced − E required at terminal voltage Vt and load current IL (generator)
+    genState(p, Vt, IL) {
+      const r = p.Ns / p.Nf, sg = CD.sigma(p), vb = p.Vb;
+      let If, Ia, Is, Va, Ereq;
+      if (p.conn === 'short') { Va = Vt + IL * p.Rs; If = Va / p.Rf; Ia = IL + If; Is = IL; Ereq = Va + Ia * p.Ra + (Ia > 0 ? vb : 0); }
+      else { If = Vt / p.Rf; Ia = IL + If; Is = Ia; Va = Vt; Ereq = Vt + Ia * (p.Ra + p.Rs) + (Ia > 0 ? vb : 0); }
+      const Ife = If + sg * r * Is, K = CD.kOf(p, Ife), Eprod = p.w * K;
+      return { Vt, IL, If, Ia, Is, Va, Ife, K, Ea: Eprod, Ereq, h: Eprod - Ereq };
+    },
+    // largest self-consistent terminal voltage for load current IL; collapsed = no solution (voltage collapses to ~0)
+    generator(p, IL) {
+      if (!(p.Isat > 0) || !fin(p.Isat)) return { ok: false, msg: 'A self-excited generator needs a magnetic saturation knee Isat > 0 (the linear model has no stable voltage).' };
+      if (!(p.w > 0)) return { ok: false, msg: 'Speed must be > 0.' };
+      const Vhi = p.w * p.Laf * p.Isat * (1 + 1e-9), N = 400;
+      let prev = Vhi, hit = -1;
+      for (let i = 0; i <= N; i++) {
+        const v = Vhi * (1 - i / N), h = CD.genState(p, v, IL).h;
+        if (h >= -1e-12) { hit = i; break; }
+        prev = v;
+      }
+      if (hit < 0) return Object.assign(CD.genState(p, 0, IL), { ok: true, collapsed: true, Vt: 0 });
+      if (hit === 0) return Object.assign(CD.genState(p, Vhi, IL), { ok: true });
+      let lo = Vhi * (1 - hit / N), hi = prev;      // h(lo) >= 0 > h(hi)
+      for (let i = 0; i < 200; i++) { const m = 0.5 * (lo + hi); if (CD.genState(p, m, IL).h >= 0) lo = m; else hi = m; if (hi - lo < 1e-13 * Vhi) break; }
+      return Object.assign(CD.genState(p, lo, IL), { ok: true, collapsed: false });
+    },
+  };
+
   FSP.math.rotating = {
     syncRpm: IM.syncRpm, wsync: IM.wsync, imVphase: IM.vphase, imThevenin: IM.thevenin, imTorqueTh: IM.torqueTh,
     imSolveFull: IM.solveFull, imTorqueFull: IM.torqueFull, imBreakdown: IM.breakdown, imOp: IM.op, imMode: IM.mode, imSweep: IM.sweep,
     dcSolve: DC.solve, dcStallCurrent: DC.stallCurrent,
+    imControl: SC.control, imLoadTorque: SC.loadTorque, imOperatingPoint: SC.operatingPoint, imVfFrac: SC.vfFrac,
+    dcCompoundMotor: CD.motor, dcCompoundGen: CD.generator, dcCompoundGenState: CD.genState,
     phases: TP.phases, mmfVector: TP.mmfVector, mmfAt: TP.mmfAt, rotationRate: TP.rotationRate,
     threePhaseQuantities: TP.quantities, phasorSets: TP.phasorSets,
   };
@@ -226,6 +326,89 @@
     t.check('Delta: |Ia| = sqrt3 |Iab| and Ia lags Iab by 30 deg', t.rel(cabs(sD.line[0]), S3 * cabs(sD.phase[0]), 1e-12) && t.near(ang(sD.line[0]) - ang(sD.phase[0]), -30, 1e-9));
     t.check('line phasors also sum to zero (balanced)', Math.abs(sY.line[0].re + sY.line[1].re + sY.line[2].re) < 1e-9 && Math.abs(sD.line[0].im + sD.line[1].im + sD.line[2].im) < 1e-9);
     t.check('swapped sequence: Vbn at +120 deg', t.near(ang(M.phasorSets('Y', 400, 8, 6, -1).phase[1]), 120, 1e-9));
+    // --- induction speed control (tutorial-style hand example): delta 240 V, 4 poles, 50 Hz, R1 = 0, X1 = 1, Xm = 9, R2' = 0.2, X2' = 0.1 Ω
+    //   Zth = jXm·jX1/(j(X1+Xm)) = j0.9 Ω, Vth = 240·9/10 = 216 V, Xth+X2' = 1.0 Ω, ωs = 50π = 157.08 rad/s
+    //   Tmax = 3·216²/(2·157.08·1.0) = 139968/(100π) = 445.5 N·m, sm = R2'/(Xth+X2') = 0.2
+    const H0 = { VL: 240, conn: 'D', f: 50, poles: 4, R1: 0, X1: 1, R2: 0.2, X2: 0.1, Xm: 9, Prot: 0 };
+    const h50 = M.imBreakdown(H0);
+    t.check('hand example: Vth = 216 V, Tmax = 139968/(100π) = 445.5 N·m, sm = 0.2', t.rel(M.imThevenin(H0).VthMag, 216, 1e-12) && t.rel(h50.Tmax, 139968 / (100 * PI), 1e-12) && t.near(h50.sm, 0.2, 1e-12));
+    // V/f with R1 = 0:  Vth ∝ V' = aV, ωs' = aωs, Xth+X2' = a(Xth+X2')  =>  Tmax' = 3a²Vth²/(2aωs·a(X)) = Tmax  (sm' = sm/a)
+    [0.5, 0.2, 0.8].forEach(a => {
+      const c = M.imControl(H0, 'vf', { f: 50 * a, boost: 0 }), b = M.imBreakdown(c.p2);
+      t.check('V/f, R1 = 0: breakdown torque identical at ' + (50 * a) + ' Hz and 50 Hz; sm = 0.2/' + a, c.ok && t.rel(b.Tmax, h50.Tmax, 1e-12) && t.rel(b.sm, 0.2 / a, 1e-12));
+    });
+    t.check('V/f, R1 = 0: speed drop at breakdown ns\'·sm is the same at 25 Hz (750·0.4) and 50 Hz (1500·0.2) = 300 rpm', (() => { const c = M.imControl(H0, 'vf', { f: 25, boost: 0 }); return t.rel(M.syncRpm(25, 4) * M.imBreakdown(c.p2).sm, 300, 1e-12) && t.rel(M.syncRpm(50, 4) * h50.sm, 300, 1e-12); })());
+    t.check('V/f: T(a·s) at 50 Hz = T(s) at 25 Hz (R1 = 0), i.e. the curve is the same shape with slip scaled by 1/a', (() => { const c = M.imControl(H0, 'vf', { f: 25, boost: 0 }); return t.rel(M.imTorqueTh(c.p2, 0.1), M.imTorqueTh(H0, 0.05), 1e-12); })());
+    const cv0 = M.imControl(P0, 'vf', { f: 25, boost: 0 }), cvb = M.imControl(P0, 'vf', { f: 25, boost: 0.15 });
+    const r0 = M.imBreakdown(cv0.p2).Tmax / M.imBreakdown(P0).Tmax, rb = M.imBreakdown(cvb.p2).Tmax / M.imBreakdown(P0).Tmax;
+    t.check('V/f with R1 > 0: Tmax at 25 Hz falls below the 50 Hz value (only approximately constant); boost recovers it', r0 < 0.99 && r0 > 0.5 && rb > r0, 'ratio ' + r0.toFixed(3) + ' → ' + rb.toFixed(3) + ' with 15 % boost');
+    t.check('V/f voltage law: a = 0.5, b = 0.2 → 0.5 + 0.2·0.5 = 0.6; b = 0 → a; a ≥ 1 → rated; machine VL scaled and X ∝ f', (() => { const c = M.imControl(P0, 'vf', { f: 25, boost: 0.2 }); return t.near(M.imVfFrac(0.5, 0.2), 0.6, 1e-15) && t.near(M.imVfFrac(0.5, 0), 0.5, 1e-15) && M.imVfFrac(1.4, 0.3) === 1 && t.rel(c.p2.VL, 400 * 0.6, 1e-12) && t.rel(c.p2.X1, 0.6, 1e-12) && t.rel(c.p2.Xm, 17.5, 1e-12) && c.p2.R2 === P0.R2; })());
+    t.check('V/f above base frequency: V constant (field weakening), Tmax falls ∝ 1/a² (R1 = 0): 75 Hz → 445.5/2.25', (() => { const c = M.imControl(H0, 'vf', { f: 75, boost: 0 }); return t.rel(M.imBreakdown(c.p2).Tmax, h50.Tmax / 2.25, 1e-12); })());
+    // added rotor resistance: K = |Zth + jX2'| has no R2', so sm = R2'/K ∝ R2'; Tmax = 3Vth²/(2ωs(Rth+K)) unchanged
+    const cr = M.imControl(P0, 'rot', { Rext: 0.9 }), bP = M.imBreakdown(P0), bR = M.imBreakdown(cr.p2);
+    t.check('rotor resistance: sm scales by (R2\'+Rext)/R2\' = 1.5/0.6 = 2.5, Tmax unchanged (R1 > 0 case)', t.rel(bR.sm, 2.5 * bP.sm, 1e-12) && t.rel(bR.Tmax, bP.Tmax, 1e-12));
+    // T depends on s only through R2'/s: R2'/s unchanged when s_new = s_old·(R2+Rext)/R2 = 2.5·s_old
+    t.check('rotor resistance: T_new(2.5·s) = T_old(s) (same curve, slip axis stretched by (R2+Rext)/R2)', t.rel(M.imTorqueTh(cr.p2, 0.125), M.imTorqueTh(P0, 0.05), 1e-12) && t.rel(M.imTorqueTh(cr.p2, 2.5), M.imTorqueTh(P0, 1), 1e-12));
+    t.check('rotor resistance of Rext = sm·K − R2 makes the starting torque the maximum: T(1) = Tmax', (() => { const K = M.imThevenin(P0).K, c = M.imControl(P0, 'rot', { Rext: K - P0.R2 }); return t.rel(M.imTorqueTh(c.p2, 1), bP.Tmax, 1e-9); })());
+    // stator voltage control: Vth ∝ V so T ∝ V² at fixed slip, slip at Tmax unchanged
+    const ck = M.imControl(P0, 'volt', { k: 0.8 });
+    t.check('voltage control: T(s) scales by (V/V0)² = 0.64 at s = 0.03, 0.2, 1; sm unchanged; Tmax × 0.64', [0.03, 0.2, 1].every(s => t.rel(M.imTorqueTh(ck.p2, s), 0.64 * M.imTorqueTh(P0, s), 1e-12)) && t.rel(M.imBreakdown(ck.p2).sm, bP.sm, 1e-12) && t.rel(M.imBreakdown(ck.p2).Tmax, 0.64 * bP.Tmax, 1e-12));
+    t.check('speed-control inputs validated (k ≤ 0, Rext < 0, f ≤ 0, boost > 1, unknown method) and p not mutated', !M.imControl(P0, 'volt', { k: 0 }).ok && !M.imControl(P0, 'rot', { Rext: -1 }).ok && !M.imControl(P0, 'vf', { f: -5, boost: 0 }).ok && !M.imControl(P0, 'vf', { f: 25, boost: 2 }).ok && !M.imControl(P0, 'xyz', {}).ok && P0.VL === 400 && P0.R2 === 0.6 && P0.f === 50);
+    // operating point, constant torque TL = 200 N·m on the hand example.  With R1 = 0:  T = 3Vth²R2·s/(ωs(R2² + s²X²))  (X = Xth+X2' = 1)
+    //   TL·ωs·X²·s² − 3Vth²R2·s + TL·ωs·R2² = 0   → a = 31 415.9, b = 27 993.6, c = 1256.64, s = (b − √(b²−4ac))/(2a) = 0.04741 (stable, smaller root)
+    const wsH = 50 * PI, TLc = 200, Aq = TLc * wsH, Bq = 3 * 216 * 216 * 0.2, Cq = TLc * wsH * 0.04, sq = (Bq - Math.sqrt(Bq * Bq - 4 * Aq * Cq)) / (2 * Aq);
+    const opc = M.imOperatingPoint(H0, { type: 'const', T: TLc, n: 1500 });
+    t.check('constant load 200 N·m: slip from the quadratic (0.04741), n = 1500(1−s) = 1428.9 rpm', opc.ok && t.near(sq, 0.04741, 2e-5) && t.rel(opc.s, sq, 1e-9) && t.rel(opc.n, 1500 * (1 - sq), 1e-9) && t.rel(opc.T, 200, 1e-9));
+    const op25 = M.imOperatingPoint(M.imControl(H0, 'vf', { f: 25, boost: 0 }).p2, { type: 'const', T: TLc, n: 1500 });
+    t.check('V/f (R1 = 0), constant torque: the speed drop below ns\' is the same at 25 Hz and 50 Hz (Δn = 71.1 rpm); n = 750 − Δn', op25.ok && t.rel(750 - op25.n, 1500 - opc.n, 1e-9) && t.rel(op25.n, 750 - (1500 - opc.n), 1e-9));
+    // fan load  TL = 200 (n/1450)²;  verify against a brute-force scan for the stable crossing (different algorithm)
+    const fan = { type: 'fan', T: 200, n: 1450 }, fan2 = { type: 'fan', T: 60, n: 1450 }, opf = M.imOperatingPoint(P0, fan);
+    let sScan = NaN; { const th2 = M.imThevenin(P0), smx = M.imBreakdown(P0, th2).sm; let prev = null; for (let i = 1; i <= 200000; i++) { const s = smx * i / 200000, gg = M.imTorqueTh(P0, s, th2) - 200 * Math.pow(1500 * (1 - s) / 1450, 2); if (prev !== null && prev < 0 && gg >= 0) { sScan = s; break; } prev = gg; } }
+    t.check('fan load T_L = 200(n/1450)²: bisection root equals brute-force scan (to the 1e-5 grid) and T(s) = T_L(n)', opf.ok && Math.abs(opf.s - sScan) < 2e-6 && t.rel(opf.T, opf.TL, 1e-9) && t.rel(opf.TL, 200 * Math.pow(opf.n / 1450, 2), 1e-12), 's=' + opf.s);
+    t.check('voltage control, fan load: lower voltage → lower speed (k = 1, 0.9, 0.8; fan 60 N·m at 1450 rpm), all stable', (() => { const n = [1, 0.9, 0.8].map(k => M.imOperatingPoint(M.imControl(P0, 'volt', { k }).p2, fan2)); return n.every(o => o.ok) && n[0].n > n[1].n && n[1].n > n[2].n; })());
+    t.check('rotor resistance, constant torque: slip rises in proportion to total R2\' (s\' = s·(R2+Rext)/R2, same torque) and speed falls', (() => { const L = { type: 'const', T: 60, n: 1500 }, a = M.imOperatingPoint(P0, L), b = M.imOperatingPoint(cr.p2, L); return a.ok && b.ok && t.rel(b.s, a.s * 2.5, 1e-9) && b.n < a.n; })());
+    t.check('load above breakdown torque: no stable point (stalled), no NaN speed; zero load → s = 0 at ns', (() => { const a = M.imOperatingPoint(P0, { type: 'const', T: 400, n: 1500 }), b = M.imOperatingPoint(P0, { type: 'const', T: 0, n: 1500 }); return !a.ok && a.stalled && !('n' in a) && b.ok && b.s === 0 && b.n === 1500; })());
+    t.check('operating point rejects negative load torque and fan load with n_ref ≤ 0; start check T(1) vs load', !M.imOperatingPoint(P0, { type: 'const', T: -1, n: 1500 }).ok && !M.imOperatingPoint(P0, { type: 'fan', T: 10, n: 0 }).ok && M.imOperatingPoint(P0, { type: 'const', T: 100, n: 1500 }).canStart === false && M.imOperatingPoint(P0, { type: 'const', T: 50, n: 1500 }).canStart === true);
+
+    // --- compound DC machine (motor).  V = 240 V, Ra = 0.5, Rs = 0.1, Rf = 120 Ω, Laf = 1 (per shunt-field ampere), Nf = 1000, Ns = 2 (r = 0.002), no brush drop, linear flux
+    //   no load (Ia = 0), long shunt: If = 2 A, Ea = 240, K = 2.0 → ω0 = 120 rad/s (short shunt: series coil carries If, ω0 = Rf/(Laf(1+r)) = 119.76).
+    //   long shunt, Ia = 50 A: Is = Ia; Ea = 240 − 50(0.5+0.1) = 210 V.  Cumulative: Ife = 2 + 0.002·50 = 2.1 → ω = 100 rad/s;  differential: Ife = 1.9 → ω = 110.526 rad/s
+    //   plain shunt (no series winding): Ea = 240 − 25 = 215 V, K = 2 → 107.5 rad/s.   Speed falls: 20 (16.7 %), 12.5 (10.4 %), 9.47 (7.9 %) rad/s.
+    const C0 = { V: 240, Ra: 0.5, Rf: 120, Rs: 0.1, Nf: 1000, Ns: 2, Laf: 1, Vb: 0, Isat: 0, conn: 'long', comp: 'cum' };
+    const cum = M.dcCompoundMotor(C0, 50), dif = M.dcCompoundMotor(Object.assign({}, C0, { comp: 'diff' }), 50), shu = M.dcCompoundMotor(Object.assign({}, C0, { Ns: 0, Rs: 0 }), 50);
+    t.check('compound motor, long shunt, Ia = 50 A: cumulative ω = 210/2.1 = 100 rad/s, Tem = 2.1·50 = 105 N·m; differential ω = 210/1.9 = 110.526', t.near(cum.w, 100, 1e-9) && t.near(cum.Tem, 105, 1e-9) && t.near(cum.Ea, 210, 1e-12) && t.near(dif.w, 210 / 1.9, 1e-9) && t.near(dif.Tem, 95, 1e-9));
+    t.check('plain shunt at 50 A: ω = 215/2 = 107.5; no load: 120 rad/s for shunt, cumulative and differential', t.near(shu.w, 107.5, 1e-9) && [C0, Object.assign({}, C0, { comp: 'diff' }), Object.assign({}, C0, { Ns: 0, Rs: 0 })].every(c => t.near(M.dcCompoundMotor(c, 0).w, 120, 1e-9)));
+    t.check('speed drop no-load → 50 A: cumulative (20) > shunt (12.5) > differential (9.47 rad/s)', t.near(120 - cum.w, 20, 1e-9) && t.near(120 - shu.w, 12.5, 1e-9) && t.near(120 - dif.w, 120 - 210 / 1.9, 1e-9) && (120 - cum.w) > (120 - shu.w) && (120 - shu.w) > (120 - dif.w));
+    // short shunt, Ia = 50: If = (V − Ia·Rs)/(Rf + Rs) = 235/120.1 = 1.956703 A;  Va = If·Rf = 234.8043 V;  IL = 51.95670 A (= Is);  Ea = Va − Ia·Ra = 209.8043 V
+    //   Ife = 1.956703 + 0.002·51.9567 = 2.060616 → ω = 209.8043/2.060616 = 101.8163 rad/s
+    const shs = M.dcCompoundMotor(Object.assign({}, C0, { conn: 'short' }), 50), Ifs = 235 / 120.1, ILs = 50 + Ifs, Eas = Ifs * 120 - 25;
+    t.check('short-shunt cumulative at 50 A: If = 235/120.1, Va = 234.804 V, Ea = 209.804 V, ω = Ea/(If + 0.002·IL) = 101.816 rad/s', t.rel(shs.If, Ifs, 1e-12) && t.rel(shs.Va, Ifs * 120, 1e-12) && t.rel(shs.Ea, Eas, 1e-12) && t.rel(shs.w, Eas / (Ifs + 0.002 * ILs), 1e-12) && t.near(shs.w, 101.8163, 1e-3) && t.rel(shs.Is, ILs, 1e-12));
+    t.check('short shunt at no load: series coil carries If → ω0 = Rf/(Laf(1+r)) = 120/1.002 = 119.760; under load it differs from long shunt', t.near(M.dcCompoundMotor(Object.assign({}, C0, { conn: 'short' }), 0).w, 120 / 1.002, 1e-9) && Math.abs(shs.w - cum.w) > 0.5);
+    t.check('compound with Ns = 0, Rs = 0 equals the module\'s shunt model dcSolve (w, Tem) incl. brush drop', (() => { const c = Object.assign({}, C0, { Ns: 0, Rs: 0, Vb: 2 }), a = M.dcCompoundMotor(c, 37), b = M.dcSolve({ type: 'shunt', V: 240, Vf: 240, Ra: 0.5, Rf: 120, Rs: 0.1, Laf: 1, Vb: 2, Prot: 0 }, 37); return t.rel(a.w, b.w, 1e-12) && t.rel(a.Tem, b.Tem, 1e-12); })());
+    t.check('series-only (Rf = ∞, Laf·Ns/Nf per amp) equals dcSolve series with Laf\' = Laf·Ns/Nf = 0.002', (() => { const c = Object.assign({}, C0, { Rf: Infinity, Vb: 2 }), a = M.dcCompoundMotor(c, 20), b = M.dcSolve({ type: 'series', V: 240, Vf: 0, Ra: 0.5, Rf: 120, Rs: 0.1, Laf: 0.002, Vb: 2, Prot: 0 }, 20); return t.rel(a.w, b.w, 1e-12) && t.rel(a.Tem, b.Tem, 1e-12); })());
+    t.check('power: Pin = V·IL, Pem = Ea·Ia = Tem·ω for all connections', ['long', 'short'].every(cn => ['cum', 'diff'].every(cm => { const r = M.dcCompoundMotor(Object.assign({}, C0, { conn: cn, comp: cm }), 30); return t.rel(r.Pin, 240 * r.IL, 1e-12) && t.rel(r.Pem, r.Ea * r.Ia, 1e-12) && t.rel(r.Pem, r.Tem * r.w, 1e-12) && t.rel(r.IL, r.Ia + r.If, 1e-12); })));
+    t.check('differential compounding with a strong series winding: flux reverses → flagged, speed not a finite number', (() => { const r = M.dcCompoundMotor(Object.assign({}, C0, { comp: 'diff', Ns: 100 }), 50); return r.fluxRev && !r.runaway === (r.Ea <= 0) && !fin(r.w); })());
+
+    // --- compound generator (Fröhlich saturation K = Laf·Ife/(1+Ife/Isat)), speed 150 rad/s, Laf = 1.2, Isat = 4 A, Rf = 120 Ω
+    //   no load, short shunt (Is = IL = 0), Ra = Rs = Vb = 0:  ω·Laf/(1+If/Isat) = Rf  → If = Isat(ωLaf/Rf − 1) = 4(180/120 − 1) = 2 A, Vt = 240 V
+    //   with Ra = 0.5: ωLaf/(1+If/Isat) = Rf + Ra → If = 4(180/120.5 − 1) = 1.975104 A, Vt = Rf·If = 237.0124 V
+    const G0 = { V: 0, Ra: 0, Rf: 120, Rs: 0, Nf: 1000, Ns: 20, Laf: 1.2, Vb: 0, Isat: 4, w: 150, conn: 'short', comp: 'cum' };
+    const g1 = M.dcCompoundGen(G0, 0), g2 = M.dcCompoundGen(Object.assign({}, G0, { Ra: 0.5 }), 0);
+    t.check('generator no-load build-up: If = 2 A, Vt = 240 V (Ra = 0); with Ra = 0.5: Vt = 237.012 V', g1.ok && t.rel(g1.Vt, 240, 1e-9) && t.rel(g1.If, 2, 1e-9) && g2.ok && t.rel(g2.Vt, 120 * 4 * (180 / 120.5 - 1), 1e-9) && t.near(g2.Vt, 237.0124, 1e-3));
+    // series-only generator (Rf = ∞): Ife = (Ns/Nf)·IL = 0.05·40 = 2 A → K = 1.2·2/(1+2/4) = 1.6, E = 150·1.6 = 240 V; Vt = E − IL(Ra + Rs) = 240 − 40·0.5 = 220 V
+    const gs = M.dcCompoundGen(Object.assign({}, G0, { Rf: Infinity, Ns: 50, Ra: 0.3, Rs: 0.2, conn: 'long' }), 40);
+    t.check('series generator: Vt = 150·1.6 − 40·(0.3+0.2) = 220 V', gs.ok && t.rel(gs.Vt, 220, 1e-9) && t.rel(gs.Ea, 240, 1e-9));
+    // KVL/KCL check of a loaded compound solution, recomputed from first principles (long shunt, cumulative, IL = 40 A)
+    const GL = Object.assign({}, G0, { Ra: 0.4, Rs: 0.1, Vb: 2, Ns: 20, conn: 'long', comp: 'cum' }), gl = M.dcCompoundGen(GL, 40);
+    { const If = gl.Vt / 120, Ia = 40 + If, Ife = If + 0.02 * Ia, E = 150 * 1.2 * Ife / (1 + Ife / 4);
+      t.check('loaded long-shunt cumulative generator: E = Vt + Ia(Ra+Rs) + Vb and E = ω·K(Ife) both satisfied (<1e-9 V)', gl.ok && !gl.collapsed && Math.abs(E - (gl.Vt + Ia * 0.5 + 2)) < 1e-9 && t.rel(gl.Ia, Ia, 1e-9), 'Vt=' + gl.Vt.toFixed(3)); }
+    { const gS = Object.assign({}, GL, { conn: 'short' }), gk = M.dcCompoundGen(gS, 40), Va = gk.Vt + 40 * 0.1, If = Va / 120, Ia = 40 + If, Ife = If + 0.02 * 40, E = 150 * 1.2 * Ife / (1 + Ife / 4);
+      t.check('loaded short-shunt generator: Va = Vt + IL·Rs, Ia = IL + If, E = Va + Ia·Ra + Vb = ω·K(If + r·IL)', gk.ok && Math.abs(E - (Va + Ia * 0.4 + 2)) < 1e-9); }
+    const vOf = (cm, ns, rs) => M.dcCompoundGen(Object.assign({}, GL, { comp: cm, Ns: ns, Rs: rs }), 40).Vt;
+    t.check('generator regulation at IL = 40 A: cumulative > plain shunt > differential terminal voltage', vOf('cum', 20, 0.1) > vOf('cum', 0, 0) && vOf('cum', 0, 0) > vOf('diff', 20, 0.1), [vOf('cum', 20, 0.1), vOf('cum', 0, 0), vOf('diff', 20, 0.1)].map(v => v.toFixed(1)).join(' / '));
+    t.check('short-shunt compound generator at no load (Is = IL = 0) equals the plain shunt generator', t.rel(M.dcCompoundGen(Object.assign({}, GL, { conn: 'short' }), 0).Vt, M.dcCompoundGen(Object.assign({}, GL, { Ns: 0, conn: 'short' }), 0).Vt, 1e-9));
+    t.check('shunt generator under extreme load: voltage collapses (flagged), no NaN; invalid inputs (Isat = 0, ω ≤ 0) rejected', (() => { const c = M.dcCompoundGen(Object.assign({}, G0, { Ns: 0, Ra: 0.5 }), 2000); return c.ok && c.collapsed && c.Vt === 0 && !M.dcCompoundGen(Object.assign({}, G0, { Isat: 0 }), 10).ok && !M.dcCompoundGen(Object.assign({}, G0, { w: 0 }), 10).ok; })());
+    t.check('generator terminal voltage is monotone non-increasing with load for plain shunt (0, 20, 40, 60 A)', (() => { const v = [0, 20, 40, 60].map(i => M.dcCompoundGen(Object.assign({}, G0, { Ns: 0, Ra: 0.3, Rs: 0 }), i).Vt); return v[0] > v[1] && v[1] > v[2] && v[2] > v[3]; })());
   });
 
   /* ======================= UI ======================= */
@@ -292,9 +475,266 @@
   }
   const wrapCanvas = (parent, id, height) => { const wrap = FSP.ui.el('div', { class: 'canvas-wrap' }); parent.appendChild(wrap); const c = FSP.ui.canvas(wrap, { height }); c.cv.setAttribute('role', 'img'); if (id) c.cv.setAttribute('aria-label', id); return c; };
 
+  /* ---------- view switch inside a sub-topic ---------- */
+  function viewBar(root, defs, label, onPick) {
+    const bar = FSP.ui.el('div', { class: 'seg row', role: 'group', 'aria-label': label }); bar.style.marginBottom = '8px'; const btn = {};
+    defs.forEach(d => { btn[d[0]] = FSP.ui.el('button', { type: 'button', class: 'seg-btn', 'aria-pressed': 'false', text: d[1], onclick: () => onPick(d[0]) }); bar.appendChild(btn[d[0]]); });
+    root.appendChild(bar);
+    return { set(id) { Object.keys(btn).forEach(k => { btn[k].setAttribute('aria-pressed', String(k === id)); btn[k].classList.toggle('active', k === id); }); } };
+  }
+  const pick = (v, list, dflt) => (list.indexOf(v) >= 0 ? v : dflt);
+  const setNum = (store, o) => Object.keys(store).forEach(k => { if (o[k] !== undefined) { const v = parseFloat(o[k]); if (fin(v)) store[k].set(v, true); } });
+
+  /* ---------- 8c+: induction motor speed control ---------- */
+  function buildSpeedControl(lay, getP) {
+    const st = {}, ui = {};
+    const ctl = FSP.ui.el('div', { class: 'controls' }), stage = FSP.ui.el('div', { class: 'stage' }); lay.appendChild(ctl); lay.appendChild(stage);
+    const touch = () => { update(); FSP.state.touch(); };
+    const fs0 = FSP.ui.fieldset(ctl, 'Speed-control method');
+    ui.mode = FSP.ui.select(fs0, 'Method', [['volt', '(a) Stator voltage control'], ['rot', '(b) Added rotor resistance'], ['vf', '(c) Constant V/f (frequency)']], 'volt', touch);
+    fs0.appendChild(FSP.ui.el('div', { class: 'note', text: 'Machine data (V, f, poles, R1, X1, R2′, X2′, Xm) come from the Torque–slip analysis view. The three methods keep their own settings; the plot shows the selected one against the base curve.' }));
+    const fs1 = FSP.ui.fieldset(ctl, 'Method settings');
+    makeSliders(fs1, [
+      { k: 'kv', l: 'V / V0', min: 20, max: 120, v: 80, step: 1, u: '%' },
+      { k: 'rx', l: 'Added R2′ (ext.)', min: 0, max: 10, v: 1.2, u: 'Ω' },
+      { k: 'fn', l: 'Frequency f′', min: 1, max: 200, v: 25, u: 'Hz' },
+      { k: 'bst', l: 'LF voltage boost', min: 0, max: 30, v: 0, step: 0.5, u: '% V0' }], st, update);
+    ui.rnote = FSP.ui.el('div', { class: 'note', text: 'Added R2′ is the external rotor resistance already referred to the stator (R_ext,actual ÷ turns-ratio²). Boost: V = V0·[a + b(1−a)] for a = f′/f < 1, constant V above base frequency.' }); fs1.appendChild(ui.rnote);
+    const fs2 = FSP.ui.fieldset(ctl, 'Load torque');
+    ui.lt = FSP.ui.select(fs2, 'Load type', [['const', 'Constant torque'], ['fan', 'Fan / pump: T_L ∝ n²']], 'const', touch);
+    makeSliders(fs2, [{ k: 'lT', l: 'T_L (at n_ref)', min: 0, max: 500, v: 50, u: 'N·m' }, { k: 'ln', l: 'n_ref', min: 50, max: 6000, v: 1440, u: 'rpm' }], st, update);
+    ui.msg = FSP.ui.el('div', { class: 'msg bad', hidden: '' }); ctl.appendChild(ui.msg);
+    ui.c1 = wrapCanvas(stage, 'Induction motor torque versus speed with load torque curve for the selected speed-control method', 340); ui.c1.onResize(update);
+    ui.hud = FSP.ui.el('div', { class: 'hud' }); stage.appendChild(ui.hud);
+    ui.work = FSP.ui.working(stage);
+    const load = () => ({ type: ui.lt.value, T: st.lT.get(), n: st.ln.get() });
+    const opts = () => ({ k: st.kv.get() / 100, Rext: st.rx.get(), f: st.fn.get(), boost: st.bst.get() / 100 });
+    const NAMES_M = { volt: '(a) stator voltage', rot: '(b) rotor resistance', vf: '(c) V/f' };
+
+    function update() {
+      if (!ui.c1) return;
+      const mode = ui.mode.value, p = getP(), L = load(), o = opts(), T = theme();
+      st.kv.el.hidden = mode !== 'volt'; st.rx.el.hidden = mode !== 'rot'; st.fn.el.hidden = mode !== 'vf'; st.bst.el.hidden = mode !== 'vf'; ui.rnote.hidden = mode === 'volt';
+      st.ln.el.hidden = L.type !== 'fan';
+      const base = SC.operatingPoint(p, L), ctrl = {};
+      ['volt', 'rot', 'vf'].forEach(m => { const c = SC.control(p, m, o); ctrl[m] = c.ok ? Object.assign({ c }, SC.operatingPoint(c.p2, L)) : { c, ok: false, msg: c.msg }; });
+      const sel = ctrl[mode], msgs = [];
+      if (!sel.c.ok) msgs.push(sel.c.msg); else if (!sel.ok) msgs.push(sel.msg);
+      if (!base.ok) msgs.push('Base case: ' + base.msg);
+      if (sel.c.ok && sel.th && !sel.canStart) msgs.push('Note: starting torque ' + fmt(sel.Tstart, 1) + ' N·m is below the load torque at standstill (' + fmt(sel.TLstart, 1) + ' N·m): the motor cannot start against this load with this setting.');
+      ui.msg.hidden = msgs.length === 0; ui.msg.textContent = msgs.join(' ');
+      if (!base.th || !sel.c.ok || !sel.th) { hudSet(ui.hud, [['status', 'fix the inputs']]); ui.work.set('Inputs are invalid for this setting: ' + msgs.join(' ')); drawPlot(ui.c1, { xmin: 0, xmax: 1, ymin: 0, ymax: 1, xlabel: '', ylabel: '' }); return; }
+      const p2 = sel.c.p2, ns0 = base.ns, ns2 = sel.ns, nmax = Math.max(ns0, ns2) * 1.04;
+      const curve = (pp, th, ns) => { const x = [], y = []; for (let i = 0; i <= 240; i++) { const s = 1 - i / 240; x.push(ns * (1 - s)); y.push(IM.torqueTh(pp, Math.abs(s) < 1e-12 ? 0 : s, th)); } return { x, y }; };
+      const c0 = curve(p, base.th, ns0), c2 = curve(p2, sel.th, ns2);
+      const lx = [], ly = []; for (let i = 0; i <= 160; i++) { const n = nmax * i / 160; lx.push(n); ly.push(SC.loadTorque(L, n)); }
+      const tpk = Math.max(base.bd.Tmax, sel.bd.Tmax), ymax = Math.max(tpk, Math.min(Math.max.apply(null, ly), tpk * 1.5), 1e-6) * 1.12;
+      const pts = [];
+      if (base.ok) pts.push({ x: base.n, y: base.T, label: 'base ' + fmt(base.n, 0), color: T.muted, below: true });
+      if (sel.ok) pts.push({ x: sel.n, y: sel.T, label: 'new ' + fmt(sel.n, 0) + ' rpm', color: T.text });
+      drawPlot(ui.c1, {
+        xmin: 0, xmax: nmax, ymin: 0, ymax, xlabel: 'speed n (rpm)', ylabel: 'torque (N·m)',
+        series: [{ x: c0.x, y: c0.y, color: T.muted, width: 1.6, dash: [5, 3] }, { x: c2.x, y: c2.y, color: T.c, width: 2.4 }, { x: lx, y: ly, color: T.pink, width: 2 }],
+        vlines: [{ x: ns0 }, { x: ns2 }], points: pts,
+        legend: [{ text: 'load T_L(n)', color: T.pink }, { text: NAMES_M[mode], color: T.c }, { text: 'base curve', color: T.muted }],
+      });
+      const row = (m, lab) => { const r = ctrl[m]; return [lab, r.ok ? fmt(r.n, 1) + ' rpm, s = ' + fmt(r.s, 4) + ', T = ' + fmt(r.T, 1) + ' N·m' : (r.c && !r.c.ok ? 'invalid input' : 'stalls (no stable point)')]; };
+      const opSel = sel.ok ? IM.op(p2, sel.s) : null;
+      hudSet(ui.hud, [
+        ['base (V0, f0, R2′)', base.ok ? fmt(base.n, 1) + ' rpm, s = ' + fmt(base.s, 4) + ', T = ' + fmt(base.T, 1) + ' N·m' : 'stalls'],
+        row('volt', '(a) V = ' + fmt(st.kv.get(), 0) + ' % V0'), row('rot', '(b) R2′ + ' + fmt(st.rx.get(), 2) + ' Ω'), row('vf', '(c) f′ = ' + fmt(st.fn.get(), 1) + ' Hz'),
+        ['selected: ns′', fmt(ns2, 1) + ' rpm'], ['breakdown slip sm', fmt(sel.bd.sm, 4)], ['breakdown torque', fmt(sel.bd.Tmax, 2) + ' N·m  (' + fmt(100 * sel.bd.Tmax / base.bd.Tmax, 1) + ' % of base)'],
+        ['starting torque', fmt(sel.Tstart, 2) + ' N·m'], ['stator current', opSel ? fmt(opSel.I1, 2) + ' A' : '—'], ['power factor', opSel ? fmt(opSel.pf, 3) : '—'],
+        ['efficiency', opSel && fin(opSel.eff) ? fmt(opSel.eff * 100, 1) + ' %' : '—'], ['speed drop ns′ − n', sel.ok ? fmt(ns2 - sel.n, 1) + ' rpm' : '—'],
+      ]);
+      // ---- working
+      const W = [], a2 = sel.bd;
+      W.push('Machine: ' + p.conn + ' connection, VL = ' + fmt(p.VL, 1) + ' V → Vph = ' + fmt(IM.vphase(p), 3) + ' V, ' + p.poles + ' poles, f = ' + fmt(p.f, 2) + ' Hz → ns = 120f/P = ' + fmt(ns0, 1) + ' rpm.');
+      W.push('Torque (the same equivalent-circuit/Thevenin formula as the analysis view):');
+      W.push('  Vth = Vph·jXm/(R1 + j(X1+Xm)),  Zth = jXm(R1+jX1)/(R1+j(X1+Xm)) = Rth + jXth,  ωs = 4πf/P');
+      W.push('  T(s) = 3|Vth|²·(R2′/s) / ( ωs·[ (Rth + R2′/s)² + (Xth + X2′)² ] ),   sm = R2′/√(Rth² + (Xth+X2′)²),   Tmax = 3|Vth|² / (2ωs(Rth + √(Rth² + (Xth+X2′)²)))');
+      W.push('Base: |Vth| = ' + fmt(base.th.VthMag, 3) + ' V, Zth = ' + fmt(base.th.Rth, 4) + ' + j' + fmt(base.th.Xth, 4) + ' Ω, sm = ' + fmt(base.bd.sm, 4) + ', Tmax = ' + fmt(base.bd.Tmax, 2) + ' N·m, T(start) = ' + fmt(base.Tstart, 2) + ' N·m.');
+      W.push('Load: ' + (L.type === 'fan' ? 'T_L(n) = T_ref·(n/n_ref)² = ' + fmt(L.T, 2) + '·(n/' + fmt(L.n, 0) + ')² N·m' : 'T_L = ' + fmt(L.T, 2) + ' N·m (constant)') + ';  n = ns(1 − s).  Operating point: T(s) = T_L(n(s)) on 0 < s ≤ sm (bisection; T rises and T_L falls with s, so the root is unique).');
+      if (base.ok) W.push('Base operating point: s = ' + fmt(base.s, 5) + ', n = ' + fmt(ns0, 1) + '·(1 − ' + fmt(base.s, 5) + ') = ' + fmt(base.n, 2) + ' rpm, T = ' + fmt(base.T, 3) + ' N·m.');
+      W.push('');
+      const c = sel.c;
+      if (mode === 'volt') {
+        W.push('(a) Stator voltage control: V = ' + fmt(o.k, 4) + '·V0 = ' + fmt(p2.VL, 2) + ' V line.');
+        W.push('  Vth ∝ V, so T ∝ V² at the same slip:  T′(s) = (V/V0)²·T(s) = ' + fmt(o.k * o.k, 4) + '·T(s).  Slip at breakdown is unchanged (sm = ' + fmt(a2.sm, 4) + '); Tmax′ = ' + fmt(o.k * o.k, 4) + ' × ' + fmt(base.bd.Tmax, 2) + ' = ' + fmt(a2.Tmax, 2) + ' N·m.');
+        W.push('  Speed range is small: the stable region is 0 < s < sm, so n can only fall to ns(1 − sm) = ' + fmt(ns0 * (1 - a2.sm), 1) + ' rpm (and a constant-torque load needs T_L < Tmax′). Rotor copper loss s·Pag grows with s.');
+      } else if (mode === 'rot') {
+        W.push('(b) Added rotor resistance: R2′_total = ' + fmt(base.th ? p.R2 : 0, 4) + ' + ' + fmt(o.Rext, 4) + ' = ' + fmt(p2.R2, 4) + ' Ω (referred to the stator).');
+        W.push('  K = √(Rth² + (Xth+X2′)²) = ' + fmt(base.th.K, 4) + ' Ω does not contain R2′, so sm′ = R2′_total/K = ' + fmt(p2.R2, 4) + '/' + fmt(base.th.K, 4) + ' = ' + fmt(a2.sm, 4) + ' (× ' + fmt(p2.R2 / p.R2, 3) + ') and Tmax′ = ' + fmt(a2.Tmax, 2) + ' N·m is unchanged.');
+        W.push('  T depends on s only through R2′/s, so the same torque occurs at s′ = s·R2′_total/R2′. Rotor loss is dissipated mostly in the external resistor; wound-rotor motors only.');
+      } else {
+        const a = c.a, vf = c.vfrac;
+        W.push('(c) Constant V/f: a = f′/f = ' + fmt(o.f, 3) + '/' + fmt(p.f, 3) + ' = ' + fmt(a, 4) + ';  ns′ = 120f′/P = ' + fmt(ns2, 2) + ' rpm.');
+        W.push('  Reactances scale with frequency: X1′ = ' + fmt(p2.X1, 4) + ', X2′′ = ' + fmt(p2.X2, 4) + ', Xm′ = ' + fmt(p2.Xm, 3) + ' Ω; R1, R2′ unchanged.');
+        W.push('  Voltage: V′ = V0·[a + b(1 − a)]' + (a >= 1 ? ' → a ≥ 1: constant V0 (field weakening)' : ' = ' + fmt(p.VL, 1) + '·[' + fmt(a, 4) + ' + ' + fmt(o.boost, 3) + '·' + fmt(1 - a, 4) + '] = ' + fmt(p2.VL, 2) + ' V line') + ';  V′/f′ = ' + fmt(vf / a, 4) + ' × (V0/f).');
+        W.push('  Zth′ = ' + fmt(sel.th.Rth, 4) + ' + j' + fmt(sel.th.Xth, 4) + ' Ω, |Vth′| = ' + fmt(sel.th.VthMag, 3) + ' V;  sm′ = ' + fmt(a2.sm, 4) + ' (speed at breakdown ns′(1 − sm′) = ' + fmt(ns2 * (1 - a2.sm), 1) + ' rpm);  Tmax′ = ' + fmt(a2.Tmax, 2) + ' N·m = ' + fmt(100 * a2.Tmax / base.bd.Tmax, 1) + ' % of base.');
+        W.push('  Why Tmax is ~constant: with R1 = 0, Rth = 0 and Tmax = 3Vth²/(2ωs(Xth+X2′)); Vth ∝ V′ ∝ a, ωs ∝ a, (Xth+X2′) ∝ a, so Tmax ∝ a²/(a·a) = constant and sm ∝ 1/a. With R1 ≠ 0 (Rth does not scale) or with boost it is only approximately constant: it falls at low f unless boost compensates.');
+      }
+      W.push('');
+      if (sel.ok) {
+        W.push('New operating point: solve T′(s) = T_L(n):  s = ' + fmt(sel.s, 5) + ',  n = ns′(1 − s) = ' + fmt(ns2, 2) + '·(1 − ' + fmt(sel.s, 5) + ') = ' + fmt(sel.n, 2) + ' rpm.');
+        W.push('  Check: T′(s) = ' + fmt(sel.T, 4) + ' N·m,  T_L(n) = ' + fmt(sel.TL, 4) + ' N·m.   Speed change vs base: ' + (base.ok ? fmt(sel.n - base.n, 2) + ' rpm.' : '—'));
+        W.push('  Stator current ' + fmt(opSel.I1, 2) + ' A at pf ' + fmt(opSel.pf, 3) + (fin(opSel.eff) ? ', efficiency ' + fmt(opSel.eff * 100, 1) + ' %.' : '.'));
+      } else W.push('No stable operating point: T_L exceeds the breakdown torque (or inputs invalid).');
+      ui.work.set(W);
+    }
+    return {
+      update,
+      get: () => ({ mode: ui.mode.value, kv: st.kv.get(), rx: st.rx.get(), fn: st.fn.get(), bst: st.bst.get(), ltype: ui.lt.value, lT: st.lT.get(), ln: st.ln.get() }),
+      set(o) { ui.mode.value = pick(o.mode, ['volt', 'rot', 'vf'], 'volt'); ui.lt.value = pick(o.ltype, ['const', 'fan'], 'const'); setNum(st, o); },
+    };
+  }
+
+  /* ---------- 8d+: compound DC machine ---------- */
+  function buildCompound(lay) {
+    const st = {}, ui = {};
+    const ctl = FSP.ui.el('div', { class: 'controls' }), stage = FSP.ui.el('div', { class: 'stage' }); lay.appendChild(ctl); lay.appendChild(stage);
+    const touch = () => { update(); FSP.state.touch(); };
+    const fs0 = FSP.ui.fieldset(ctl, 'Compound machine');
+    ui.mode = FSP.ui.select(fs0, 'Operation', [['motor', 'Motor (speed–torque)'], ['gen', 'Generator (voltage–load)']], 'motor', touch);
+    ui.conn = FSP.ui.select(fs0, 'Connection', [['long', 'Long shunt'], ['short', 'Short shunt']], 'long', touch);
+    ui.comp = FSP.ui.select(fs0, 'Compounding', [['cum', 'Cumulative (series aids shunt)'], ['diff', 'Differential (series opposes)']], 'cum', touch);
+    fs0.appendChild(FSP.ui.el('div', { class: 'note', text: 'Long shunt: shunt field across the terminals, series field in series with the armature. Short shunt: shunt field across the armature only, series field in the line.' }));
+    const fs1 = FSP.ui.fieldset(ctl, 'Machine');
+    makeSliders(fs1, [
+      { k: 'V', l: 'Supply V', min: 12, max: 600, v: 240, u: 'V' }, { k: 'N', l: 'Speed', min: 100, max: 4000, v: 1450, u: 'rpm' },
+      { k: 'Ra', l: 'Ra', min: 0.01, max: 5, v: 0.5, u: 'Ω' }, { k: 'Rf', l: 'Rf (shunt)', min: 10, max: 500, v: 120, u: 'Ω' }, { k: 'Rs', l: 'Rs (series)', min: 0.01, max: 2, v: 0.1, u: 'Ω' },
+      { k: 'Nf', l: 'Shunt turns/pole', min: 100, max: 5000, v: 1000, u: '' }, { k: 'Ns', l: 'Series turns/pole', min: 1, max: 200, v: 6, u: '' },
+      { k: 'Laf', l: 'Laf', min: 0.1, max: 5, v: 1.2, step: 0.01, u: 'H' }, { k: 'Isat', l: 'Saturation knee', min: 0.5, max: 50, v: 4, step: 0.1, u: 'A (If)' },
+      { k: 'Vb', l: 'Vbrush', min: 0, max: 10, v: 2, u: 'V' }], st, update);
+    fs1.appendChild(FSP.ui.el('div', { class: 'note', text: 'Field MMF in shunt-ampere units: I_fe = If ± (Ns/Nf)·I_series. Motor: flux linear in I_fe (K = Laf·I_fe). Generator: Fröhlich saturation K = Laf·I_fe/(1 + I_fe/Isat); it needs saturation to settle at a stable voltage. Armature reaction ignored.' }));
+    const fs2 = FSP.ui.fieldset(ctl, 'Load');
+    makeSliders(fs2, [{ k: 'Ir', l: 'Rated load current', min: 5, max: 300, v: 50, u: 'A' }, { k: 'ld', l: 'Load', min: 0, max: 150, v: 100, step: 1, u: '% rated' }], st, update);
+    ui.warn = FSP.ui.el('div', { class: 'msg warn', hidden: '' }); ctl.appendChild(ui.warn);
+    ui.c1 = wrapCanvas(stage, 'Compound DC machine characteristic compared with shunt and series machines', 340); ui.c1.onResize(update);
+    ui.hud = FSP.ui.el('div', { class: 'hud' }); stage.appendChild(ui.hud);
+    ui.work = FSP.ui.working(stage);
+
+    function params() {
+      return { V: st.V.get(), Ra: st.Ra.get(), Rf: st.Rf.get(), Rs: st.Rs.get(), Nf: st.Nf.get(), Ns: st.Ns.get(), Laf: st.Laf.get(), Vb: st.Vb.get(), conn: ui.conn.value, comp: ui.comp.value, Isat: 0, w: st.N.get() * PI / 30 };
+    }
+    function update() {
+      if (!ui.c1) return;
+      const T = theme(), gen = ui.mode.value === 'gen', Ir = st.Ir.get(), x = Ir * st.ld.get() / 100, p0 = params();
+      st.V.el.hidden = gen; st.N.el.hidden = !gen; st.Isat.el.hidden = !gen;
+      const p = Object.assign({}, p0, { Isat: gen ? st.Isat.get() : 0 });
+      const warns = [];
+      const variants = pp => ({
+        shunt: Object.assign({}, pp, { Ns: 0, Rs: 0, comp: 'cum' }),
+        cum: Object.assign({}, pp, { comp: 'cum' }), diff: Object.assign({}, pp, { comp: 'diff' }),
+      });
+      const V = variants(p);
+      let serP;   // series machine for comparison: same armature, series winding sized so its full-load MMF equals the shunt no-load MMF
+      const sel = ui.comp.value;
+      const cols = { shunt: T.muted, series: T.pink, cum: T.c, diff: T.a };
+      const series = [], points = [], lines = [];
+      if (!gen) {
+        const ifNL = p.V / p.Rf; serP = Object.assign({}, p, { Rf: Infinity, Ns: p.Nf * ifNL / Ir, conn: 'long', comp: 'cum' });
+        const m0 = CD.motor(V.shunt, 0), wcap = fin(m0.w) ? m0.w * 2.4 : Infinity, imax = 1.5 * Ir;
+        const sw = pp => { const X = [], Y = []; for (let i = 0; i <= 150; i++) { const r = CD.motor(pp, imax * i / 150); if (fin(r.w) && r.w >= 0 && r.w <= wcap && r.Ea >= 0) { X.push(r.Tem); Y.push(r.rpm); } } return { x: X, y: Y }; };
+        const defs = [['series', serP, 'series (same armature)'], ['shunt', V.shunt, 'shunt'], [sel === 'cum' ? 'diff' : 'cum', sel === 'cum' ? V.diff : V.cum, sel === 'cum' ? 'differential compound' : 'cumulative compound'], [sel, V[sel], (sel === 'cum' ? 'cumulative' : 'differential') + ' compound, ' + p.conn + ' shunt']];
+        defs.forEach(d => { const c = sw(d[1]); series.push({ x: c.x, y: c.y, color: cols[d[0]], width: d[0] === sel ? 2.8 : 1.7, dash: d[0] === sel ? [] : (d[0] === 'series' || d[0] === 'shunt' ? [5, 3] : []) }); lines.push({ text: d[2], color: cols[d[0]] }); });
+        const r = CD.motor(V[sel], x);
+        if (fin(r.rpm)) points.push({ x: r.Tem, y: r.rpm, label: fmt(r.rpm, 0) + ' rpm', color: T.text });
+        const rmaxs = Math.max.apply(null, series.reduce((a, s) => a.concat(s.y), [1]));
+        drawPlot(ui.c1, { xmin: 0, xmax: Math.max.apply(null, series.reduce((a, s) => a.concat(s.x), [1e-6])) * 1.05, ymin: 0, ymax: rmaxs * 1.1, xlabel: 'electromagnetic torque (N·m)', ylabel: 'speed (rpm)', series, points, legend: lines.reverse() });
+        if (r.runaway) warns.push('K ≈ 0 at this load: the speed is unbounded (runaway).'); else if (r.fluxRev) warns.push('Differential compounding has driven the net field to zero or negative at this load: the speed rises without limit / the motor is unstable. Reduce the series turns or the load.');
+        if (r.stalled) warns.push('Back-EMF would be negative: load current beyond the stall current.');
+        const nl = CD.motor(V[sel], 0), nlS = V.shunt, rs = CD.motor(V.shunt, x);
+        const reg = (a, b) => (fin(a) && fin(b) && b > 0 ? fmt(100 * (a - b) / a, 1) + ' % fall' : '—');
+        hudSet(ui.hud, [
+          ['armature current Ia', fmt(r.Ia, 2) + ' A'], ['shunt field If', fmt(r.If, 3) + ' A'], ['series current Is', fmt(r.Is, 2) + ' A'], ['line current IL', fmt(r.IL, 2) + ' A'],
+          ['field MMF I_fe', fmt(r.Ife, 4) + ' A'], ['K = Laf·I_fe', fmt(r.K, 4) + ' V·s/rad'], ['back-EMF Ea', fmt(r.Ea, 2) + ' V'], ['speed', fin(r.rpm) ? fmt(r.rpm, 1) + ' rpm' : '—'],
+          ['Tem = K·Ia', fmt(r.Tem, 2) + ' N·m'], ['Pem = Ea·Ia', fmt(r.Pem / 1000, 3) + ' kW'], ['Pin = V·IL', fmt(r.Pin / 1000, 3) + ' kW'],
+          ['no-load speed (this)', fin(nl.rpm) ? fmt(nl.rpm, 1) + ' rpm' : '—'], ['speed change NL → load', reg(nl.rpm, r.rpm) + (fin(nl.rpm) && fin(r.rpm) && r.rpm > nl.rpm ? ' (speed RISES)' : '')],
+          ['plain shunt NL → load', reg(CD.motor(nlS, 0).rpm, rs.rpm)],
+        ]);
+        const cs = sel === 'cum' ? '+' : '−', r0 = CD.motor(V[sel], 0);
+        const W = [];
+        W.push((p.conn === 'long' ? 'Long shunt' : 'Short shunt') + ', ' + (sel === 'cum' ? 'cumulative' : 'differential') + ' compound motor.  Ia = ' + fmt(x, 2) + ' A (' + fmt(st.ld.get(), 0) + ' % of ' + fmt(Ir, 1) + ' A).');
+        if (p.conn === 'long') {
+          W.push('If = V/Rf = ' + fmt(p.V, 2) + '/' + fmt(p.Rf, 2) + ' = ' + fmt(r.If, 4) + ' A;   Is = Ia = ' + fmt(r.Is, 3) + ' A;   IL = Ia + If = ' + fmt(r.IL, 3) + ' A');
+          W.push('Ea = V − Vb − Ia(Ra + Rs) = ' + fmt(p.V, 2) + ' − ' + fmt(r.Vb, 2) + ' − ' + fmt(x, 2) + '·(' + fmt(p.Ra, 3) + ' + ' + fmt(p.Rs, 3) + ') = ' + fmt(r.Ea, 3) + ' V');
+        } else {
+          W.push('Shunt field across the armature: Va = V − IL·Rs, If = Va/Rf, IL = Ia + If  →  If = (V − Ia·Rs)/(Rf + Rs) = (' + fmt(p.V, 2) + ' − ' + fmt(x, 2) + '·' + fmt(p.Rs, 3) + ')/(' + fmt(p.Rf, 2) + ' + ' + fmt(p.Rs, 3) + ') = ' + fmt(r.If, 4) + ' A');
+          W.push('IL = ' + fmt(r.IL, 3) + ' A = Is (series field carries the line current);  Va = V − IL·Rs = ' + fmt(r.Va, 3) + ' V');
+          W.push('Ea = Va − Vb − Ia·Ra = ' + fmt(r.Va, 3) + ' − ' + fmt(r.Vb, 2) + ' − ' + fmt(x, 2) + '·' + fmt(p.Ra, 3) + ' = ' + fmt(r.Ea, 3) + ' V');
+        }
+        W.push('Net field MMF (shunt-ampere units): I_fe = If ' + cs + ' (Ns/Nf)·Is = ' + fmt(r.If, 4) + ' ' + cs + ' (' + fmt(p.Ns, 1) + '/' + fmt(p.Nf, 0) + ')·' + fmt(r.Is, 3) + ' = ' + fmt(r.Ife, 4) + ' A');
+        W.push('K = Laf·I_fe = ' + fmt(p.Laf, 3) + '·' + fmt(r.Ife, 4) + ' = ' + fmt(r.K, 4) + ' V·s/rad;   ω = Ea/K = ' + (fin(r.w) ? fmt(r.w, 3) + ' rad/s = ' + fmt(r.rpm, 1) + ' rpm' : 'undefined (K ≤ 0)') + ';   Tem = K·Ia = ' + fmt(r.Tem, 3) + ' N·m');
+        W.push('No load (Ia = 0): ω0 = ' + (fin(r0.w) ? fmt(r0.w, 3) + ' rad/s = ' + fmt(r0.rpm, 1) + ' rpm' : '—') + '.  Plain shunt (series winding removed): Ea = ' + fmt(rs.Ea, 3) + ' V, K = Laf·If = ' + fmt(rs.K, 4) + ' → ' + fmt(rs.rpm, 1) + ' rpm.');
+        W.push('Cumulative: series MMF adds, flux rises with load, so speed falls MORE than a shunt motor (and torque is larger for the same Ia). Differential: series MMF opposes, flux falls with load, so speed falls LESS, can even rise, and is unstable if I_fe → 0.');
+        W.push('Comparison curves: shunt = same machine with Ns = 0, Rs = 0.  Series = same armature (Ra, Rs), no shunt field, series turns chosen so I_fe at rated current equals the shunt no-load If (' + fmt(serP.Ns, 2) + ' turns/pole equivalent).  Curves are cut at 2.4× the shunt no-load speed (series runaway).');
+        ui.work.set(W);
+      } else {
+        // ----- generator
+        const ifNL = CD.generator(Object.assign({}, V.shunt, { conn: 'short' }), 0);
+        const bad = !ifNL.ok ? ifNL.msg : null;
+        if (bad) { ui.warn.hidden = false; ui.warn.textContent = bad; ui.work.set(bad); hudSet(ui.hud, [['status', 'fix inputs']]); drawPlot(ui.c1, { xmin: 0, xmax: 1, ymin: 0, ymax: 1 }); return; }
+        const Ifnl = ifNL.collapsed ? 0.2 : ifNL.If;
+        serP = Object.assign({}, p, { Rf: Infinity, Ns: p.Nf * Ifnl / Ir, conn: 'long', comp: 'cum' });
+        const imax = 1.6 * Ir;
+        const sw = pp => { const X = [], Y = []; for (let i = 0; i <= 100; i++) { const il = imax * i / 100, g = CD.generator(pp, il); if (!g.ok || g.collapsed) break; X.push(il); Y.push(g.Vt); } return { x: X, y: Y }; };
+        const defs = [['series', serP, 'series generator'], ['shunt', V.shunt, 'shunt generator'], [sel === 'cum' ? 'diff' : 'cum', sel === 'cum' ? V.diff : V.cum, sel === 'cum' ? 'differential compound' : 'cumulative compound'], [sel, V[sel], (sel === 'cum' ? 'cumulative' : 'differential') + ' compound, ' + p.conn + ' shunt']];
+        defs.forEach(d => { const c = sw(d[1]); series.push({ x: c.x, y: c.y, color: cols[d[0]], width: d[0] === sel ? 2.8 : 1.7, dash: d[0] === sel ? [] : (d[0] === 'series' || d[0] === 'shunt' ? [5, 3] : []) }); lines.push({ text: d[2], color: cols[d[0]] }); });
+        const g = CD.generator(V[sel], x), g0 = CD.generator(V[sel], 0), gs = CD.generator(V.shunt, x), g0s = CD.generator(V.shunt, 0);
+        if (g.ok && !g.collapsed) points.push({ x, y: g.Vt, label: fmt(g.Vt, 1) + ' V', color: T.text });
+        const vmax = Math.max.apply(null, series.reduce((a, s) => a.concat(s.y), [1]));
+        drawPlot(ui.c1, { xmin: 0, xmax: imax, ymin: 0, ymax: vmax * 1.1, xlabel: 'load current IL (A)', ylabel: 'terminal voltage Vt (V)', series, points, legend: lines.reverse() });
+        if (g.collapsed) warns.push('Voltage collapse: at this load there is no self-consistent terminal voltage (the generator has stalled out). Reduce the load or raise the speed.');
+        if (g0.collapsed) warns.push('No voltage build-up at no load: Laf·ω must exceed the shunt-circuit resistance (critical resistance) for self-excitation.');
+        const reg = (a, b) => (a > 0 ? fmt(100 * (a - b) / a, 1) + ' %' : '—');
+        hudSet(ui.hud, [
+          ['load current IL', fmt(x, 2) + ' A'], ['terminal voltage Vt', g.collapsed ? '0 (collapsed)' : fmt(g.Vt, 2) + ' V'], ['shunt field If', fmt(g.If, 3) + ' A'], ['armature current Ia', fmt(g.Ia, 2) + ' A'],
+          ['series current Is', fmt(g.Is, 2) + ' A'], ['field MMF I_fe', fmt(g.Ife, 4) + ' A'], ['K', fmt(g.K, 4) + ' V·s/rad'], ['generated EMF E = Kω', fmt(g.Ea, 2) + ' V'],
+          ['no-load voltage (this)', fmt(g0.Vt, 2) + ' V'], ['voltage drop NL → load', g0.Vt > 0 ? reg(g0.Vt, g.Vt) + (g.Vt > g0.Vt ? ' (voltage RISES)' : '') : '—'],
+          ['plain shunt: NL / load', fmt(g0s.Vt, 1) + ' V / ' + (gs.collapsed ? 'collapsed' : fmt(gs.Vt, 1) + ' V')], ['load power Vt·IL', fmt(g.Vt * x / 1000, 3) + ' kW'],
+        ]);
+        const cs = sel === 'cum' ? '+' : '−', W = [];
+        W.push((p.conn === 'long' ? 'Long shunt' : 'Short shunt') + ', ' + (sel === 'cum' ? 'cumulative' : 'differential') + ' compound generator at ω = ' + fmt(p.w, 3) + ' rad/s (' + fmt(st.N.get(), 0) + ' rpm), IL = ' + fmt(x, 2) + ' A.');
+        if (p.conn === 'long') {
+          W.push('Shunt field across the terminals: If = Vt/Rf;  Ia = IL + If;  series field in the armature path: Is = Ia.');
+          W.push('KVL: E = Vt + Ia(Ra + Rs) + Vb');
+        } else {
+          W.push('Shunt field across the armature: Va = Vt + IL·Rs;  If = Va/Rf;  Ia = IL + If;  Is = IL.');
+          W.push('KVL: E = Va + Ia·Ra + Vb  = Vt + IL·Rs + Ia·Ra + Vb');
+        }
+        W.push('I_fe = If ' + cs + ' (Ns/Nf)·Is;   E = ω·K(I_fe) = ω·Laf·I_fe/(1 + I_fe/Isat)   (Laf = ' + fmt(p.Laf, 3) + ' H, Isat = ' + fmt(p.Isat, 2) + ' A, Ns/Nf = ' + fmt(p.Ns, 1) + '/' + fmt(p.Nf, 0) + ')');
+        W.push('Both expressions for E must agree: solve for the largest Vt (bisection) — the stable upper intersection of the field-resistance line with the saturating magnetisation curve.');
+        if (!g.collapsed) {
+          W.push('Result: Vt = ' + fmt(g.Vt, 3) + ' V;  If = ' + fmt(g.If, 4) + ' A;  Ia = ' + fmt(g.Ia, 3) + ' A;  Is = ' + fmt(g.Is, 3) + ' A;  I_fe = ' + fmt(g.Ife, 4) + ' A;  K = ' + fmt(g.K, 4) + ';  E = ' + fmt(g.Ea, 3) + ' V');
+          W.push('Check: E required = ' + fmt(g.Ereq, 3) + ' V, E produced = ' + fmt(g.Ea, 3) + ' V.');
+        } else W.push('No solution for this load: the voltage collapses.');
+        W.push('No-load voltage ' + fmt(g0.Vt, 2) + ' V (' + (p.conn === 'long' ? 'long shunt carries If in the series field at no load' : 'short shunt: series field carries IL = 0') + ').  Cumulative compounding keeps Vt up (the series MMF compensates the armature drop and can over-compound); differential makes it fall sharply (welding sets).');
+        W.push('Comparison: shunt = Ns = 0, Rs = 0 (drooping curve, collapses at high load); series = no shunt field, series turns sized so I_fe at rated current equals the no-load If of the shunt machine; Vt rises with IL, then falls.');
+        ui.work.set(W);
+      }
+      ui.warn.hidden = warns.length === 0; ui.warn.textContent = warns.join(' ');
+    }
+    return {
+      update,
+      get: () => ({ c_mode: ui.mode.value, c_conn: ui.conn.value, c_comp: ui.comp.value, c_V: st.V.get(), c_N: st.N.get(), c_Ra: st.Ra.get(), c_Rf: st.Rf.get(), c_Rs: st.Rs.get(), c_Nf: st.Nf.get(), c_Ns: st.Ns.get(), c_Laf: st.Laf.get(), c_Isat: st.Isat.get(), c_Vb: st.Vb.get(), c_Ir: st.Ir.get(), c_ld: st.ld.get() }),
+      set(o) {
+        ui.mode.value = pick(o.c_mode, ['motor', 'gen'], 'motor'); ui.conn.value = pick(o.c_conn, ['long', 'short'], 'long'); ui.comp.value = pick(o.c_comp, ['cum', 'diff'], 'cum');
+        Object.keys(st).forEach(k => { if (o['c_' + k] !== undefined) { const v = parseFloat(o['c_' + k]); if (fin(v)) st[k].set(v, true); } });
+      },
+    };
+  }
+
   /* ---------- 8c panel ---------- */
   function buildInduction(root) {
-    const st = {}, ui = {}; const lay = FSP.ui.el('div', { class: 'layout' }); root.appendChild(lay);
+    const st = {}, ui = {}; let view = 'analysis';
+    const vbar = viewBar(root, [['analysis', 'Torque–slip analysis'], ['speed', 'Speed control']], 'Induction motor view', v => setView(v));
+    const lay = FSP.ui.el('div', { class: 'layout' }); root.appendChild(lay);
+    const lay2 = FSP.ui.el('div', { class: 'layout', hidden: '' }); root.appendChild(lay2);
+    const sc = buildSpeedControl(lay2, () => params());
+    function setView(v, silent) { view = v; vbar.set(v); lay.hidden = v !== 'analysis'; lay2.hidden = v !== 'speed'; updateAll(); if (!silent) FSP.state.touch(); }
+    function updateAll() { if (view === 'analysis') update(); else sc.update(); }
+    vbar.set(view);
     const ctl = FSP.ui.el('div', { class: 'controls' }), stage = FSP.ui.el('div', { class: 'stage' }); lay.appendChild(ctl); lay.appendChild(stage);
     const fs1 = FSP.ui.fieldset(ctl, 'Supply & construction');
     makeSliders(fs1, [
@@ -368,9 +808,10 @@
       if (!(bd.Tmax > 0)) { ui.msg.hidden = false; ui.msg.textContent = 'Parameters give no valid torque curve.'; }
     }
     return {
-      update,
-      get: () => ({ VL: val(st, 'VL'), f: val(st, 'f'), conn: ui.conn.value, poles: ui.poles.value, R1: val(st, 'R1'), X1: val(st, 'X1'), R2: val(st, 'R2'), X2: val(st, 'X2'), Xm: val(st, 'Xm'), Prot: val(st, 'Prot'), sr: val(st, 'sr') }),
+      update: updateAll,
+      get: () => Object.assign({ view, VL: val(st, 'VL'), f: val(st, 'f'), conn: ui.conn.value, poles: ui.poles.value, R1: val(st, 'R1'), X1: val(st, 'X1'), R2: val(st, 'R2'), X2: val(st, 'X2'), Xm: val(st, 'Xm'), Prot: val(st, 'Prot'), sr: val(st, 'sr') }, sc.get()),
       set(o) {
+        sc.set(o); setView(pick(o.view, ['analysis', 'speed'], 'analysis'), true);
         Object.keys(st).forEach(k => { if (o[k] !== undefined) { const v = parseFloat(o[k]); if (fin(v)) st[k].set(v, true); } });
         if (o.conn === 'Y' || o.conn === 'D') ui.conn.value = o.conn;
         if (['2', '4', '6', '8', '10', '12'].indexOf(o.poles) >= 0) ui.poles.value = o.poles;
@@ -380,7 +821,14 @@
 
   /* ---------- 8d panel ---------- */
   function buildDC(root) {
-    const st = {}, ui = {}; const lay = FSP.ui.el('div', { class: 'layout' }); root.appendChild(lay);
+    const st = {}, ui = {}; let view = 'single';
+    const vbar = viewBar(root, [['single', 'Shunt / series / separate'], ['compound', 'Compound machine']], 'DC machine view', v => setView(v));
+    const lay = FSP.ui.el('div', { class: 'layout' }); root.appendChild(lay);
+    const lay2 = FSP.ui.el('div', { class: 'layout', hidden: '' }); root.appendChild(lay2);
+    const cc = buildCompound(lay2);
+    function setView(v, silent) { view = v; vbar.set(v); lay.hidden = v !== 'single'; lay2.hidden = v !== 'compound'; updateAll(); if (!silent) FSP.state.touch(); }
+    function updateAll() { if (view === 'single') update(); else cc.update(); }
+    vbar.set(view);
     const ctl = FSP.ui.el('div', { class: 'controls' }), stage = FSP.ui.el('div', { class: 'stage' }); lay.appendChild(ctl); lay.appendChild(stage);
     const LAF = { sep: 0.8, shunt: 0.8, series: 0.032 };
     const fs1 = FSP.ui.fieldset(ctl, 'Machine & excitation');
@@ -467,9 +915,10 @@
       ]);
     }
     return {
-      update,
-      get: () => ({ type: ui.type.value, V: val(st, 'V'), Vf: val(st, 'Vf'), Laf: val(st, 'Laf'), Ra: val(st, 'Ra'), Rf: val(st, 'Rf'), Rs: val(st, 'Rs'), Vb: val(st, 'Vb'), Prot: val(st, 'Prot'), Irated: val(st, 'Irated'), load: val(st, 'load') }),
+      update: updateAll,
+      get: () => Object.assign({ view, type: ui.type.value, V: val(st, 'V'), Vf: val(st, 'Vf'), Laf: val(st, 'Laf'), Ra: val(st, 'Ra'), Rf: val(st, 'Rf'), Rs: val(st, 'Rs'), Vb: val(st, 'Vb'), Prot: val(st, 'Prot'), Irated: val(st, 'Irated'), load: val(st, 'load') }, cc.get()),
       set(o) {
+        cc.set(o); setView(pick(o.view, ['single', 'compound'], 'single'), true);
         if (['sep', 'shunt', 'series'].indexOf(o.type) >= 0) ui.type.value = o.type;
         Object.keys(st).forEach(k => { if (o[k] !== undefined) { const v = parseFloat(o[k]); if (fin(v)) st[k].set(v, true); } });
       },

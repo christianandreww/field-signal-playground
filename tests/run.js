@@ -6,7 +6,11 @@ const fs = require('fs'), path = require('path'), vm = require('vm');
 const root = path.join(__dirname, '..');
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 // Script order comes from index.html; DOM-only scripts are marked data-dom and skipped here.
-const files = [...html.matchAll(/<script\s+([^>]*)src="([^"]+)"([^>]*)><\/script>/g)].filter(m => !/data-dom/.test(m[1] + m[3])).map(m => m[2]);
+// `node tests/run.js --with js/modules/x.js` loads only that one of the NEW modules (others are skipped) so parallel work can be tested in isolation.
+const NEW = ['js/modules/netproto.js', 'js/modules/dsp2.js', 'js/modules/fields.js', 'js/modules/edm2.js'];
+const wi = process.argv.indexOf('--with'), only = wi > 0 ? process.argv.slice(wi + 1) : null;
+const files0 = [...html.matchAll(/<script\s+([^>]*)src="([^"]+)"([^>]*)><\/script>/g)].filter(m => !/data-dom/.test(m[1] + m[3])).map(m => m[2]);
+const files = only ? files0.filter(f => NEW.indexOf(f) < 0 || only.indexOf(f) >= 0) : files0;
 const ctx = vm.createContext({ console, Math, Number, Float64Array, Float32Array, Uint8Array, Int32Array, Uint32Array, TextEncoder, setTimeout, clearTimeout });
 ctx.globalThis = ctx;
 for (const f of files) {

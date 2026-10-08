@@ -211,8 +211,54 @@
     return { ok: true, count, newPrefix: np, list, truncated: shown < count, rounded: count !== N };
   }
 
+  // "100, 50 25" -> {ok, hosts:[100,50,25]}
+  function parseHostList(str) {
+    if (typeof str !== 'string' || !str.trim()) return { ok: false, error: 'Enter the required host counts, e.g. 100, 50, 25.' };
+    const toks = str.split(/[\s,;]+/).filter(Boolean), hosts = [];
+    for (const t of toks) {
+      if (!/^\d+$/.test(t)) return { ok: false, error: '"' + t + '" is not a whole number of hosts.' };
+      const n = parseInt(t, 10); if (n < 1) return { ok: false, error: 'Each subnet needs at least 1 host.' };
+      if (n > 4294967294) return { ok: false, error: n + ' hosts cannot fit in IPv4.' };
+      hosts.push(n);
+    }
+    if (hosts.length > 64) return { ok: false, error: 'At most 64 subnets.' };
+    return { ok: true, hosts };
+  }
+  // Largest aligned CIDR blocks covering [start, end] (inclusive)
+  function rangeToBlocks(start, end) {
+    const out = [];
+    while (start <= end) {
+      let size = 1;
+      while (size * 2 <= 4294967296 && start % (size * 2) === 0 && start + size * 2 - 1 <= end) size *= 2;
+      out.push(subnetInfo(start, 32 - Math.round(Math.log2(size)))); start += size;
+    }
+    return out;
+  }
+  // VLSM: allocate subnets largest-first from the network of `info`. Each needs hosts + 2 addresses (network + broadcast),
+  // rounded up to a power of two (classic VLSM; /31 point-to-point is not used, so 1-2 hosts -> /30).
+  function vlsm(info, hosts) {
+    if (!Array.isArray(hosts) || !hosts.length) return { ok: false, error: 'No host counts given.' };
+    const base = info.network, end = info.network + info.total - 1;
+    const order = hosts.map((h, i) => ({ h, i })).sort((a, b) => b.h - a.h || a.i - b.i);
+    let cur = base; const list = [];
+    for (const o of order) {
+      const bits = Math.ceil(Math.log2(o.h + 2)), size = Math.pow(2, bits), prefix = 32 - bits;
+      if (prefix < info.prefix) return { ok: false, error: 'Subnet ' + (o.i + 1) + ' needs ' + o.h + ' hosts → /' + prefix + ' (' + size + ' addresses), larger than the whole /' + info.prefix + ' block (' + info.total + ').' };
+      cur = Math.ceil((cur - base) / size) * size + base;
+      if (cur + size - 1 > end) {
+        const need = order.reduce((s, x) => s + Math.pow(2, Math.ceil(Math.log2(x.h + 2))), 0);
+        return { ok: false, error: 'Does not fit: the subnets need ' + need.toLocaleString() + ' addresses in total but /' + info.prefix + ' has ' + info.total.toLocaleString() + ' (ran out at subnet ' + (o.i + 1) + ', ' + o.h + ' hosts).' };
+      }
+      const s = subnetInfo(cur, prefix);
+      list.push(Object.assign(s, { index: o.i, need: o.h, size, wasted: s.hosts - o.h }));
+      cur += size;
+    }
+    const used = cur - base, leftover = cur <= end ? rangeToBlocks(cur, end) : [];
+    return { ok: true, list, used, free: info.total - used, leftover, base: info };
+  }
+
   FSP.math.comms = { erf, erfc, Q, theoryBER, constellation, modInfo, simulateBER, wilson, raisedCosine, eyeTraces, eyeOpening, shannon,
-    parseIPv4, parsePrefix, parseCIDR, subnetInfo, splitSubnet, toDotted, MODS };
+    parseIPv4, parsePrefix, parseCIDR, subnetInfo, splitSubnet, toDotted, MODS, parseHostList, vlsm, rangeToBlocks };
 
   /* ===================================================================== tests */
   FSP.registerTests('comms', function (t) {
@@ -302,11 +348,23 @@
     const sp3 = M.splitSubnet(M.parseCIDR('10.0.0.0/24').info, 3);
     t.check('Split into 3 rounds up to 4 and says so; /31 -> 2 x /32; over-split rejected', sp3.ok && sp3.count === 4 && sp3.rounded && M.splitSubnet(M.parseCIDR('1.1.1.0/31').info, 2).newPrefix === 32
       && !M.splitSubnet(M.parseCIDR('1.1.1.1/31').info, 4).ok && !M.splitSubnet(M.parseCIDR('1.1.1.1/24').info, 0).ok && !M.splitSubnet(M.parseCIDR('1.1.1.1/24').info, 2.5).ok, '');
+    // VLSM 192.168.1.0/24 for 100, 50, 25 hosts (given out of order):
+    // 100+2 -> 128 = /25: .0-.127 (usable .1-.126, 126 hosts); 50+2 -> 64 = /26: .128-.191; 25+2 -> 32 = /27: .192-.223; free .224/27
+    const v1 = M.vlsm(M.parseCIDR('192.168.1.0/24').info, M.parseHostList('25, 100 50').hosts), D = M.toDotted;
+    t.check('VLSM /24 -> 100, 50, 25 hosts: /25 .0, /26 .128, /27 .192, leftover .224/27', v1.ok
+      && v1.list.map(s => D(s.network) + '/' + s.prefix).join() === '192.168.1.0/25,192.168.1.128/26,192.168.1.192/27'
+      && v1.list.map(s => s.need).join() === '100,50,25' && v1.list[0].index === 1 && D(v1.list[1].broadcast) === '192.168.1.191' && D(v1.list[2].first) === '192.168.1.193' && D(v1.list[2].last) === '192.168.1.222'
+      && D(v1.list[1].mask) === '255.255.255.192' && v1.free === 32 && v1.leftover.length === 1 && D(v1.leftover[0].network) + '/' + v1.leftover[0].prefix === '192.168.1.224/27', '');
+    // 200 -> /24 (256) and 100 -> /25 (128): 384 > 256 -> error. 2 hosts -> /30. Leftover of a /24 after one /26 = /26 + /25.
+    const v2 = M.vlsm(M.parseCIDR('10.0.0.0/24').info, [200, 100]), v3 = M.vlsm(M.parseCIDR('10.0.0.0/24').info, [2]), v4 = M.vlsm(M.parseCIDR('10.0.0.0/24').info, [60]);
+    t.check('VLSM: overflow rejected with message; 2 hosts -> /30; leftover split into aligned blocks', !v2.ok && /384/.test(v2.error) && !M.vlsm(M.parseCIDR('10.0.0.0/24').info, [300]).ok
+      && v3.ok && v3.list[0].prefix === 30 && v4.leftover.map(b => D(b.network) + '/' + b.prefix).join() === '10.0.0.64/26,10.0.0.128/25'
+      && !M.parseHostList('10, x').ok && !M.parseHostList('0').ok && !M.parseHostList('').ok, v2.error);
   });
 
   /* ===================================================================== UI */
   let built = false, active = false, ui = {}, redrawTimer = 0;
-  const S = { mod: 'qpsk', ebn0: 6, seed: 1, nmax: 200000, beta: 0.35, jitter: 0.03, noise: 0.05, solve: 'C', sB: '1M', sSnr: '30', sC: '10M', cidr: '192.168.1.130/26', split: 4 };
+  const S = { mod: 'qpsk', ebn0: 6, seed: 1, nmax: 200000, beta: 0.35, jitter: 0.03, noise: 0.05, solve: 'C', sB: '1M', sSnr: '30', sC: '10M', cidr: '192.168.1.130/26', split: 4, cmode: 'split', vlsm: '100, 50, 25' };
   let sim = null, sweep = [], eye = null;
 
   function css(name, fb) { try { const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim(); return v || fb; } catch (e) { return fb; } }
@@ -432,21 +490,42 @@
     const M = FSP.math.comms, p = M.parseCIDR(S.cidr), D = M.toDotted;
     ui.cidrOut.innerHTML = ''; ui.splitOut.textContent = '';
     ui.cidrIn.setAttribute('aria-invalid', p.ok ? 'false' : 'true');
-    if (!p.ok) { ui.cidrMsg.hidden = false; ui.cidrMsg.textContent = p.error; ui.cidrWork.set('Fix the input above.'); ui.splitMsg.hidden = true; return; }
+    if (!p.ok) { ui.cidrMsg.hidden = false; ui.cidrMsg.textContent = p.error; ui.cidrWork.set('Fix the input above.'); ui.splitMsg.hidden = true; ui.vlsmMsg.hidden = true; ui.vlsmOut.textContent = ''; return; }
     ui.cidrMsg.hidden = true; const i = p.info, bin = v => D(v).split('.').map(o => ('00000000' + (+o).toString(2)).slice(-8)).join('.');
     [['Address', D(i.ip)], ['Network', D(i.network) + '/' + i.prefix], ['Broadcast', i.prefix >= 31 ? D(i.broadcast) + (i.prefix === 32 ? ' (n/a)' : ' (n/a, RFC 3021)') : D(i.broadcast)],
       ['Subnet mask', D(i.mask)], ['Wildcard', D(i.wildcard)], ['Host range', D(i.first) + (i.first === i.last ? '' : ' – ' + D(i.last))],
       ['Usable hosts', i.hosts.toLocaleString()], ['Total addresses', i.total.toLocaleString()]]
       .forEach(([a, b]) => ui.cidrOut.appendChild(FSP.ui.el('div', null, FSP.ui.el('span', { text: a }), FSP.ui.el('span', { text: b }))));
     if (i.note) ui.cidrOut.appendChild(FSP.ui.el('div', { class: 'note', text: i.note }));
-    ui.cidrWork.set(['Address  ' + bin(i.ip), 'Mask     ' + bin(i.mask) + '  (/' + i.prefix + ')', 'Network  ' + bin(i.network) + '  = address AND mask', 'Bcast    ' + bin(i.broadcast) + '  = network OR wildcard',
+    ui.cidrWorkBase = (['Address  ' + bin(i.ip), 'Mask     ' + bin(i.mask) + '  (/' + i.prefix + ')', 'Network  ' + bin(i.network) + '  = address AND mask', 'Bcast    ' + bin(i.broadcast) + '  = network OR wildcard',
       'Total = 2^(32 − ' + i.prefix + ') = ' + i.total.toLocaleString() + '; usable = ' + (i.prefix >= 31 ? (i.prefix === 31 ? '2 (RFC 3021 point-to-point)' : '1 (host route)') : 'total − 2 = ' + i.hosts.toLocaleString())]);
+    ui.cidrWork.set(ui.cidrWorkBase);
+    ui.splitBox.hidden = S.cmode !== 'split'; ui.vlsmBox.hidden = S.cmode !== 'vlsm';
+    if (S.cmode === 'vlsm') { updVlsm(i); return; }
     const sp = M.splitSubnet(i, S.split, 64);
     if (!sp.ok) { ui.splitMsg.hidden = false; ui.splitMsg.textContent = sp.error; return; }
     ui.splitMsg.hidden = !sp.rounded; ui.splitMsg.className = 'msg warn'; ui.splitMsg.textContent = 'Rounded up to ' + sp.count + ' subnets (a power of two) so that all blocks are equal.';
     ui.splitOut.textContent = sp.count + ' × /' + sp.newPrefix + '  (' + (sp.list[0].hosts).toLocaleString() + ' usable hosts each)\n' +
       sp.list.map((s, n) => String(n + 1).padStart(2) + '. ' + D(s.network) + '/' + s.prefix + '  ' + D(s.first) + ' – ' + D(s.last) + (s.prefix >= 31 ? '' : '  bc ' + D(s.broadcast))).join('\n') +
       (sp.truncated ? '\n… ' + (sp.count - sp.list.length) + ' more' : '');
+  }
+
+  function updVlsm(base) {
+    const M = FSP.math.comms, D = M.toDotted, ph = M.parseHostList(S.vlsm);
+    ui.vlsmOut.textContent = '';
+    const r = ph.ok ? M.vlsm(base, ph.hosts) : ph;
+    if (!r.ok) { ui.vlsmMsg.hidden = false; ui.vlsmMsg.textContent = r.error; ui.cidrWork.set(ui.cidrWorkBase.concat(['', 'VLSM: ' + r.error])); return; }
+    ui.vlsmMsg.hidden = true;
+    const pad = (x, n) => String(x).padEnd(n);
+    ui.vlsmOut.textContent = 'Base ' + D(base.network) + '/' + base.prefix + ' (' + base.total.toLocaleString() + ' addresses), allocated largest first\n' +
+      pad('#', 3) + pad('need', 7) + pad('subnet', 20) + pad('mask', 17) + pad('usable range', 33) + 'broadcast\n' +
+      r.list.map(x => pad(x.index + 1, 3) + pad(x.need, 7) + pad(D(x.network) + '/' + x.prefix, 20) + pad(D(x.mask), 17) + pad(D(x.first) + ' – ' + D(x.last), 33) + D(x.broadcast) + '   (' + x.hosts.toLocaleString() + ' usable, ' + x.wasted.toLocaleString() + ' spare)').join('\n') +
+      '\nUsed ' + r.used.toLocaleString() + ' of ' + base.total.toLocaleString() + ' addresses; free ' + r.free.toLocaleString() + (r.leftover.length ? ': ' + r.leftover.slice(0, 16).map(b => D(b.network) + '/' + b.prefix).join(', ') + (r.leftover.length > 16 ? ', …' : '') : '');
+    const W = ui.cidrWorkBase.concat(['', 'VLSM (classic: each subnet reserves network + broadcast, so it needs hosts + 2 addresses rounded up to a power of two):',
+      '1. Sort requests largest first: ' + r.list.map(x => x.need).join(', ') + '.', '2. For each, smallest 2^k ≥ hosts + 2 gives prefix /(32 − k); place it at the next free address (largest-first keeps every block aligned).']);
+    r.list.forEach(x => W.push('   ' + x.need + ' hosts: ' + x.need + ' + 2 = ' + (x.need + 2) + ' ≤ 2^' + (32 - x.prefix) + ' = ' + x.size + ' → /' + x.prefix + ' at ' + D(x.network) + ', broadcast ' + D(x.broadcast) + ', next free ' + D(x.network + x.size)));
+    W.push('3. Leftover ' + r.free.toLocaleString() + ' addresses' + (r.leftover.length ? ' = ' + r.leftover.map(b => D(b.network) + '/' + b.prefix).slice(0, 16).join(' + ') : '') + '.');
+    ui.cidrWork.set(W);
   }
 
   /* ---- build ---- */
@@ -496,9 +575,16 @@
     const f4 = U.fieldset(panel, '4 · IPv4 CIDR / subnet calculator'), ctl4 = U.el('div'); ui.cidrIn = numInput(ctl4, 'CIDR', S.cidr, el => { S.cidr = el.value; updCidr(); FSP.state.touch(); }, { inputmode: 'text', size: 18, spellcheck: 'false' });
     ui.cidrMsg = U.el('div', { class: 'msg err', hidden: '', role: 'alert' }); ctl4.appendChild(ui.cidrMsg);
     ui.cidrOut = U.el('div', { class: 'hud' }); ctl4.appendChild(ui.cidrOut);
-    ui.splitIn = numInput(ctl4, 'Split into N', String(S.split), el => { const v = Number(el.value); S.split = el.value.trim() === '' ? NaN : v; updCidr(); FSP.state.touch(); }, { inputmode: 'numeric' });
-    ui.splitMsg = U.el('div', { class: 'msg err', hidden: '' }); ctl4.appendChild(ui.splitMsg);
-    ui.splitOut = U.el('pre', { class: 'mono note' }); ui.splitOut.style.overflowX = 'auto'; ctl4.appendChild(ui.splitOut);
+    ui.cmodeSel = U.select(ctl4, 'Subnetting', [['split', 'Equal split'], ['vlsm', 'VLSM']], S.cmode, v => { S.cmode = v; updCidr(); FSP.state.touch(); });
+    ui.splitBox = U.el('div'); ctl4.appendChild(ui.splitBox);
+    ui.splitIn = numInput(ui.splitBox, 'Split into N', String(S.split), el => { const v = Number(el.value); S.split = el.value.trim() === '' ? NaN : v; updCidr(); FSP.state.touch(); }, { inputmode: 'numeric' });
+    ui.splitMsg = U.el('div', { class: 'msg err', hidden: '' }); ui.splitBox.appendChild(ui.splitMsg);
+    ui.splitOut = U.el('pre', { class: 'mono note' }); ui.splitOut.style.overflowX = 'auto'; ui.splitBox.appendChild(ui.splitOut);
+    ui.vlsmBox = U.el('div', { hidden: '' }); ctl4.appendChild(ui.vlsmBox);
+    ui.vlsmIn = numInput(ui.vlsmBox, 'Hosts per subnet', S.vlsm, el => { S.vlsm = el.value; updCidr(); FSP.state.touch(); }, { inputmode: 'text', size: 18, spellcheck: 'false' });
+    ui.vlsmBox.appendChild(U.el('div', { class: 'note', text: 'Comma-separated host counts; the base block is the network of the CIDR above.' }));
+    ui.vlsmMsg = U.el('div', { class: 'msg err bad', hidden: '', role: 'alert' }); ui.vlsmBox.appendChild(ui.vlsmMsg);
+    ui.vlsmOut = U.el('pre', { class: 'mono note' }); ui.vlsmOut.style.overflowX = 'auto'; ui.vlsmOut.style.whiteSpace = 'pre'; ui.vlsmBox.appendChild(ui.vlsmOut);
     f4.appendChild(ctl4); ui.cidrWork = U.working(f4);
     built = true;
   }
@@ -506,12 +592,12 @@
     if (!built) return;
     ui.modSel.value = S.mod; ui.ebn0.set(S.ebn0, true); ui.nmaxSel.value = String(S.nmax); ui.seed.value = String(S.seed);
     ui.beta.set(S.beta, true); ui.jit.set(S.jitter, true); ui.nz.set(S.noise, true);
-    ui.shSel.value = S.solve; ui.sh.B.value = S.sB; ui.sh.snr.value = S.sSnr; ui.sh.C.value = S.sC; ui.cidrIn.value = S.cidr; ui.splitIn.value = String(S.split);
+    ui.shSel.value = S.solve; ui.sh.B.value = S.sB; ui.sh.snr.value = S.sSnr; ui.sh.C.value = S.sC; ui.cidrIn.value = S.cidr; ui.splitIn.value = String(S.split); ui.cmodeSel.value = S.cmode; ui.vlsmIn.value = S.vlsm;
   }
   function refreshAll() { runSim(); runEye(); updShannon(); updCidr(); }
 
   FSP.state.bind('comms', {
-    get: () => ({ mod: S.mod, ebn0: S.ebn0, seed: S.seed, nmax: S.nmax, beta: S.beta, jit: S.jitter, nz: S.noise, solve: S.solve, B: S.sB, snr: S.sSnr, C: S.sC, cidr: S.cidr, split: S.split }),
+    get: () => ({ mod: S.mod, ebn0: S.ebn0, seed: S.seed, nmax: S.nmax, beta: S.beta, jit: S.jitter, nz: S.noise, solve: S.solve, B: S.sB, snr: S.sSnr, C: S.sC, cidr: S.cidr, split: S.split, cmode: S.cmode, vlsm: S.vlsm }),
     set(p) {
       const num = (k, lo, hi, d) => { const v = parseFloat(p[k]); return Number.isFinite(v) && v >= lo && v <= hi ? v : d; };
       if (p.mod && FSP.math.comms.MODS[p.mod]) S.mod = p.mod;
@@ -521,6 +607,8 @@
       ['B:sB', 'snr:sSnr', 'C:sC'].forEach(s => { const [k, f] = s.split(':'); if (typeof p[k] === 'string' && p[k].length < 40) S[f] = p[k]; });
       if (typeof p.cidr === 'string' && p.cidr.length < 60) S.cidr = p.cidr;
       const sp = parseInt(p.split, 10); if (Number.isFinite(sp) && sp >= 1 && sp <= 1048576) S.split = sp;
+      if (p.cmode === 'split' || p.cmode === 'vlsm') S.cmode = p.cmode;
+      if (typeof p.vlsm === 'string' && p.vlsm.length < 400) S.vlsm = p.vlsm;
       if (built) { syncControls(); if (active) refreshAll(); }
     },
   });
