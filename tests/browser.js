@@ -12,7 +12,7 @@ let pw; try { pw = require(process.env.PW_MODULE || 'playwright'); } catch (e) {
   await page.goto('file://' + path.join(__dirname, '..', 'index.html') + '?selftest');
   await page.waitForTimeout(500);
   const ids = await page.$$eval('[role=tab]', els => els.map(e => e.id));
-  for (const id of ids) { await page.click('#' + id); await page.waitForTimeout(400); const vis = await page.$eval('#' + id, e => document.getElementById(e.getAttribute('aria-controls')).hidden); if (vis) errs.push('panel hidden for ' + id); }
+  for (const id of ids) { await page.$eval('#' + id, e => e.click()); await page.waitForTimeout(400); const vis = await page.$eval('#' + id, e => document.getElementById(e.getAttribute('aria-controls')).hidden); if (vis) errs.push('panel hidden for ' + id); }
   const st = await page.$eval('#selftest-out', e => e.textContent);
   console.log('tabs: ' + ids.join(', ')); console.log(st.split('\n').slice(-1)[0]);
   if (/FAIL/.test(st)) errs.push('self-test failures in page');

@@ -25,6 +25,36 @@ function labelBox(ctx, text, x, y, align) {
 /* ---------- tabs & animation loops ---------- */
 let activeModule = 'em', emRaf = 0, dspRaf = 0;
 FSP.mountTabs(document.querySelector('.tabs'), document.querySelector('main'));
+/* Group the tab buttons by subject (desktop) and build the matching <select> picker (narrow screens). */
+const TAB_GROUPS = [
+  ['Electromagnetics', ['em', 'fields', 'tline']],
+  ['Signals & DSP', ['dsp', 'dsplab', 'dspdesign', 'filters', 'audio']],
+  ['Communications', ['comms', 'net']],
+  ['Machines', ['magnetics', 'edm2', 'rotating']],
+];
+const tabGroupOf = {}, lastInGroup = {};
+const groupBtns = {}, groupWraps = {};
+{
+  const list = document.querySelector('.tabs'), picker = $('tab-picker');
+  const all = Array.from(list.querySelectorAll('[role=tab]'));
+  const groups = TAB_GROUPS.map(g => [g[0], g[1].map(id => all.find(t => t.id === 'tab-' + id)).filter(Boolean)]);
+  const rest = all.filter(t => !groups.some(g => g[1].includes(t)));
+  if (rest.length) groups.push(['More', rest]);
+  const bar = document.createElement('div'); bar.className = 'group-bar'; bar.setAttribute('role', 'group'); bar.setAttribute('aria-label', 'Subject');
+  list.parentNode.insertBefore(bar, list);
+  groups.forEach(([name, btns]) => {
+    if (!btns.length) return;
+    const wrap = document.createElement('div'); wrap.className = 'tab-group'; wrap.setAttribute('role', 'presentation');
+    btns.forEach(b => { wrap.appendChild(b); tabGroupOf[b.id] = name; }); list.appendChild(wrap); groupWraps[name] = wrap;
+    lastInGroup[name] = btns[0].id;
+    const gb = document.createElement('button'); gb.type = 'button'; gb.className = 'group-btn'; gb.textContent = name; gb.setAttribute('aria-pressed', 'false');
+    gb.addEventListener('click', () => activateTab(lastInGroup[name], false)); bar.appendChild(gb); groupBtns[name] = gb;
+    const og = document.createElement('optgroup'); og.label = name;
+    btns.forEach(b => { const o = document.createElement('option'); o.value = b.id; o.textContent = b.textContent; og.appendChild(o); });
+    picker.appendChild(og);
+  });
+  picker.addEventListener('change', () => { activateTab(picker.value, false); window.scrollTo(0, 0); });
+}
 const tabs = Array.from(document.querySelectorAll('[role=tab]'));
 function activateTab(id, focus) {
   const next = id.replace(/^tab-/, '');
@@ -41,6 +71,12 @@ function activateTab(id, focus) {
     startLoops();
     FSP.state.setActive(next);
   }
+  showGroupFor(id);
+}
+function showGroupFor(id) {
+  const pk = $('tab-picker'); if (pk && pk.value !== id) pk.value = id;
+  const g = tabGroupOf[id]; if (!g) return; lastInGroup[g] = id;
+  Object.keys(groupWraps).forEach(k => { groupWraps[k].hidden = k !== g; groupBtns[k].setAttribute('aria-pressed', String(k === g)); });
 }
 tabs.forEach((t, i) => {
   t.addEventListener('click', () => activateTab(t.id, false));
@@ -692,6 +728,7 @@ FSP.state.bind('dsp', {
   b.addEventListener('click', () => { const url = FSP.state.link(); const done = () => { b.textContent = 'Copied'; setTimeout(() => { b.textContent = 'Copy link'; }, 1200); }; if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(url).then(done, () => window.prompt('Copy this link', url)); else window.prompt('Copy this link', url); });
   hdr.appendChild(b);
 }
+showGroupFor('tab-em');
 { const want = FSP.state.restore(); if (want && want !== 'em' && $('tab-' + want)) activateTab('tab-' + want, false); else FSP.state.setActive('em'); }
 if (/selftest/.test(location.search)) { const res = FSP.runSelfTests(); const pre = $('selftest-out'); pre.hidden = false; pre.textContent = res.lines.join('\n'); }
 window.runSelfTests = FSP.runSelfTests;

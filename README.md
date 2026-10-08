@@ -1,6 +1,6 @@
 # Field & Signal Playground
 
-A zero-dependency, build-free engineering sandbox that runs by double-clicking `index.html` (works from `file://`). Thirteen tabs, all with a "Show working" panel and shareable URL state ("Copy link").
+A zero-dependency, build-free engineering sandbox that runs by double-clicking `index.html` (works from `file://`). Thirteen tools grouped by subject (Electromagnetics, Signals & DSP, Communications, Machines), all with a "Show working" panel and shareable URL state ("Copy link").
 
 | Tab | What it does |
 |---|---|
