@@ -250,7 +250,12 @@ M.maxEff = function (p, pf) { const x = Math.sqrt(p.Pcore / p.PcuRated), po = x 
 /* =============================================================
    Part C: UI (all DOM work inside init/activate)
    ============================================================= */
-const TXT = '#8b98ab', GRID = '#243047', COL = { core: '#4cc9f0', gap: '#f9a03f', par: '#f72585', ok: '#2ecc71', fg: '#e6edf3' };
+let TXT = '#8b98ab', GRID = '#243047';
+const COL = {};
+function refreshTheme() {
+  TXT = FSP.ui.color('--muted', '#8b98ab'); GRID = FSP.ui.color('--border', '#243047');
+  Object.assign(COL, { core: FSP.ui.color('--chart-blue', '#4cc9f0'), gap: FSP.ui.color('--chart-orange', '#f9a03f'), par: FSP.ui.color('--pink', '#f72585'), ok: FSP.ui.color('--ok', '#2ecc71'), fg: FSP.ui.color('--text', '#e6edf3') });
+}
 const fin = Number.isFinite;
 const fE = (x, u, d) => fin(x) ? FSP.fmtEng(x, u, d || 4) : '—';
 const fN = (x, d) => fin(x) ? FSP.fmtNum(x, d || 5) : '—';
@@ -373,12 +378,12 @@ function drawNetwork(cv) {
   const xP1 = par ? xR - Math.min(110, w * 0.3) : xR;
   const wire = (x0, y0, x1, y1, col) => { ctx.strokeStyle = col || '#6f819c'; ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke(); };
   const boxH = (cx, y, name, val, col, mmf) => {
-    ctx.fillStyle = '#0f141f'; ctx.strokeStyle = col; ctx.fillRect(cx - 28, y - 10, 56, 20); ctx.strokeRect(cx - 28, y - 10, 56, 20);
+    ctx.fillStyle = FSP.ui.color('--panel2', '#0f141f'); ctx.strokeStyle = col; ctx.fillRect(cx - 28, y - 10, 56, 20); ctx.strokeRect(cx - 28, y - 10, 56, 20);
     ctx.fillStyle = col; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'; ctx.fillText(name, cx, y - 13);
     ctx.fillStyle = TXT; ctx.textBaseline = 'top'; ctx.fillText(val, cx, y + 13); ctx.fillText(mmf, cx, y + 25);
   };
   const boxV = (x, cy, name, col) => {
-    ctx.fillStyle = '#0f141f'; ctx.strokeStyle = col; ctx.fillRect(x - 10, cy - 24, 20, 48); ctx.strokeRect(x - 10, cy - 24, 20, 48);
+    ctx.fillStyle = FSP.ui.color('--panel2', '#0f141f'); ctx.strokeStyle = col; ctx.fillRect(x - 10, cy - 24, 20, 48); ctx.strokeRect(x - 10, cy - 24, 20, 48);
     ctx.fillStyle = col; ctx.textAlign = 'right'; ctx.textBaseline = 'middle'; ctx.fillText(name, x - 14, cy);
   };
   const ymid = (yT + yB) / 2;
@@ -393,7 +398,7 @@ function drawNetwork(cv) {
     ctx.fillStyle = TXT; ctx.textAlign = 'right'; ctx.textBaseline = 'middle'; ctx.fillText('R₂‖R₃ = ' + fR(r.Rpar), xP1 - 14, ymid + 16);
   }
   // MMF source
-  ctx.strokeStyle = COL.fg; ctx.fillStyle = '#0f141f'; ctx.beginPath(); ctx.arc(xL, ymid, 16, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
+  ctx.strokeStyle = COL.fg; ctx.fillStyle = FSP.ui.color('--panel2', '#0f141f'); ctx.beginPath(); ctx.arc(xL, ymid, 16, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
   ctx.fillStyle = COL.fg; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('NI', xL, ymid);
   ctx.textBaseline = 'top'; ctx.fillStyle = TXT; ctx.textAlign = 'left'; ctx.fillText(fE(r.NI, 'A·t', 3), xL + 20, ymid - 6);
   boxH(cx1, yT, 'R_core', fR(r.Rcore), COL.core, fF(r.m.Fc));
@@ -449,6 +454,7 @@ function workingA() {
 }
 
 function updateA(U) {
+  refreshTheme();
   if (!inited) return;
   computeA();
   const { c, r } = RA, m = r.m;
@@ -570,6 +576,7 @@ function workingB() {
 }
 
 function updateB(U) {
+  refreshTheme();
   if (!inited) return;
   computeB();
   if (!RB.p.ok) { U.warn.hidden = false; U.warn.textContent = RB.p.msg; renderHud(U.hud, [['Parameters', '—']]); U.working.set(RB.p.msg); return; }

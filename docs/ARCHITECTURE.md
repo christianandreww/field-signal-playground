@@ -19,6 +19,14 @@ Math remains available under the existing `FSP.math` names. A module's `_shared`
 
 `js/v1-ui.js` retains the original EM/DSP interfaces and global navigation. Subject groups must be revealed before focus moves to a tab in another group.
 
+## Lab Studio presentation
+
+`js/core/appearance.js` runs before styles load, is marked `data-dom`, and preserves a validated Light/Dark/System preference when storage is available. `css/studio.css` layers a responsive application shell over the existing module styles. Appearance tokens and subject accents are independent: `data-appearance` selects readable surfaces/text, and `data-subject` selects EE3101, IE3014, IE3017, or EE2005 accents. Status colors remain independent of subject identity.
+
+`js/studio-ui.js` supplies course names, concise tool titles, learning prompts, and the wave tool's progressive disclosure. It moves existing control elements so listeners and mathematical state stay intact. `FSP.studio.activate()` updates the course identity before the destination tool redraws. `FSP.redrawActive()` repaints the current tool after appearance changes, without starting audio or resetting its design. Original hardcoded chart colors in the EM/DSP, line, and magnetics interfaces now resolve the shared palette at draw time. The EM heat map retains its physical diverging color scale.
+
+The desktop shell uses a subject/tool sidebar. Below 900px it exposes the existing mobile picker instead. The wave tool puts its field map and three solver-derived results first, essential controls second on mobile, and detailed theory afterwards. Material/display settings and numerical diagnostics are expandable. Other tools retain their scientific controls within the shared layout; their individual workflows can be refined without changing the common shell.
+
 ## Saved links
 
 Hash values are strings and are untrusted. The decoder uses dictionaries without prototypes, rejects `__proto__`, `constructor`, and `prototype` as tab or parameter names, and restores only registered own bindings. Each tool still validates its own values.
@@ -36,5 +44,7 @@ The original DSP lab tracks both context and source generations. Butterworth/Che
 Run `node tests/run.js` for numerical and saved-state checks. `--with js/modules/fields.js` (or `dsp2.js`, `edm2.js`, `netproto.js`) retains the focused-test interface, including extracted math and self-tests.
 
 Run `npm ci`, `npx playwright install chromium`, and `npm run test:browser` for actual visible navigation, all top-level subtopics, keyboard and mobile selection, filter-response round trips, malformed links, and controlled audio races. The test does not use a physical microphone or verify perceptual audio quality. Missing tooling fails rather than producing a successful skip.
+
+The browser command also runs `tests/studio.js`: all 13 tools at six widths (320–1440px), subject identity, solver-derived summary values, advanced control reachability, appearance persistence and canvas repainting, system appearance changes, reduced motion, storage denial, and the order of mobile controls.
 
 When adding a tool, register its numerical API and self-tests without accessing the DOM at load time. Register the interface with `FSP.registerTab`, bind validated state, add model assumptions to `FSP.modelNotes`, and place its ID in the appropriate subject group. Update the browser tool count and verify the new interface through visible controls.

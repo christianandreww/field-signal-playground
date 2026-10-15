@@ -4,18 +4,29 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Field &amp; Signal Playground</title>
+<script src="js/core/appearance.js" data-dom></script>
 <link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/studio.css">
 </head>
 <body>
-<header>
-  <h1>Field &amp; Signal Playground <small>EEE study lab</small></h1>
+<a class="skip-link" href="#main-content">Skip to workspace</a>
+<header class="app-header">
+  <div class="app-brand"><span class="brand-mark" aria-hidden="true">∿</span><h1>Field &amp; Signal<span class="brand-caption">Your engineering workspace</span></h1></div>
+  <label class="appearance-wrap"><span>Appearance</span><select id="appearance-picker" aria-label="Appearance"><option value="light">Light</option><option value="dark">Dark</option><option value="system">System</option></select></label>
   <label class="tab-picker-wrap"><span class="sr-only">Choose a tool</span><select id="tab-picker" aria-label="Choose a tool"></select></label>
-  <div class="tabs" role="tablist" aria-label="Modules">
+</header>
+<aside class="app-sidebar" aria-label="Subjects and tools">
+  <p class="sidebar-label">Your subjects</p>
+  <div id="subject-navigation">
+  <div class="tabs" role="tablist" aria-label="Tools" aria-orientation="vertical">
     <button role="tab" id="tab-em" aria-selected="true" aria-controls="panel-em" tabindex="0">EM Wave &amp; Boundary</button>
     <button role="tab" id="tab-dsp" aria-selected="false" aria-controls="panel-dsp" tabindex="-1">DSP &amp; Biquad Lab</button>
   </div>
-</header>
-<main>
+  </div>
+  <p class="sidebar-footer">NTU EEE study lab<br>Explore. Connect. Understand.</p>
+</aside>
+<main class="app-main" id="main-content" tabindex="-1">
+<div class="workspace-heading"><p class="workspace-course" id="workspace-course">EE3101 / Electromagnetics</p><h2 id="workspace-title">Waves at a boundary</h2><p class="workspace-description" id="workspace-description">Explore what happens when a wave meets a different material.</p></div>
 <!-- ================= MODULE 1 ================= -->
 <section id="panel-em" role="tabpanel" aria-labelledby="tab-em">
 <div class="layout">
@@ -46,7 +57,7 @@
   <fieldset><legend>Display</legend>
     <div class="ctl"><label for="em-speed">Speed</label><input id="em-speed" type="range" min="0" max="3" step="0.05" value="1"><button class="btn" id="em-play" aria-pressed="true">Pause</button></div>
     <div class="ctl"><label for="em-quality">Quality</label><select id="em-quality"><option value="160">Low (160 px)</option><option value="240" selected>Medium (240 px)</option><option value="360">High (360 px)</option><option value="540">Ultra (540 px)</option></select><span></span></div>
-    <div class="ctl"><label for="em-arrows">S arrows</label><select id="em-arrows"><option value="inst">Instantaneous S(t)</option><option value="avg">Time-averaged ⟨S⟩</option><option value="off">Off</option></select><span></span></div>
+    <div class="ctl"><label for="em-arrows">S arrows</label><select id="em-arrows"><option value="inst">Instantaneous S(t)</option><option value="avg">Time-averaged ⟨S⟩</option><option value="off" selected>Off</option></select><span></span></div>
     <div class="ctl"><label for="em-field">Field</label><select id="em-field"><option value="A">Ey (TE) / Hy (TM)</option><option value="E">|E| from Ex, Ez (TM only)</option></select><span></span></div>
     <div class="ctl"><label for="em-span">View (λ0)</label><input id="em-span" type="range" min="8" max="14" step="0.5" value="10"><output id="em-span-o"></output></div>
     <div class="note">Drag on the canvas (above the interface) to set θi.</div>
@@ -149,6 +160,8 @@
 <script src="js/selftests/edm2.js"></script>
 <script src="js/modules/edm2.js" data-dom></script>
 <script src="js/v1-ui.js" data-dom></script>
+<script src="js/studio-ui.js" data-dom></script>
+<script src="js/theory-lessons.js" data-dom></script>
 </main>
 </body>
 </html>
