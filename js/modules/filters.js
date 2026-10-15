@@ -535,12 +535,15 @@
     S.ui.sineRow.style.display = kind === 'sine' ? '' : 'none';
   }
   function stopSource() { clearInterval(A.sweepTimer); A.sweepTimer = 0; if (A.src) { try { A.src.stop(); } catch (e) { /* not started */ } try { A.src.disconnect(); } catch (e) { /* ok */ } A.src = null; } }
+  let audioGeneration = 0;
   async function startAudio() {
     if (A.ctx || A.starting) return; A.starting = true; aState();
+    const generation = ++audioGeneration;
     const AC = typeof window !== 'undefined' && (window.AudioContext || window.webkitAudioContext);
     if (!AC) { aMsg('Web Audio API is not available in this browser.', 'err'); A.starting = false; aState(); return; }
     let ctx; try { ctx = new AC({ sampleRate: S.p.fs }); } catch (e) { ctx = new AC(); }
     A.ctx = ctx; A.fs = ctx.sampleRate; A.mode = '';
+    aState(); // Stop remains available while the worklet is loading.
     ctx.addEventListener('statechange', aState);
     aMsg(ctx.sampleRate !== S.p.fs ? 'AudioContext runs at ' + ctx.sampleRate + ' Hz (design fs ' + S.p.fs + ' Hz); the audio filter is redesigned at the context rate with the same edge frequencies.' : '', 'warn');
     A.master = ctx.createGain(); A.master.gain.value = S.ui.level.get(); A.master.connect(ctx.destination);
@@ -549,15 +552,18 @@
       if (!ctx.audioWorklet) throw new Error('AudioWorklet unavailable');
       const url = URL.createObjectURL(new Blob([WORKLET_SRC], { type: 'application/javascript' }));
       try { await ctx.audioWorklet.addModule(url); } finally { URL.revokeObjectURL(url); }
+      if (generation !== audioGeneration || A.ctx !== ctx) return;
       A.mode = 'AudioWorklet';
-    } catch (e) { A.mode = 'IIRFilterNode fallback'; aMsg('AudioWorklet unavailable (' + e.message + '). Using a chain of IIRFilterNodes, rebuilt with a 40 ms crossfade on changes.', 'warn'); }
-    if (!A.ctx) { A.starting = false; return; }              // stopped while loading
+    } catch (e) { if (generation !== audioGeneration || A.ctx !== ctx) return; A.mode = 'IIRFilterNode fallback'; aMsg('AudioWorklet unavailable (' + e.message + '). Using a chain of IIRFilterNodes, rebuilt with a 40 ms crossfade on changes.', 'warn'); }
+    if (generation !== audioGeneration || A.ctx !== ctx) return;              // stopped while loading
     A.des = audioDesign();
     if (!A.des) { aMsg('Current parameters cannot be designed at this sample rate.', 'err'); stopAudio(); A.starting = false; return; }
-    try { A.chain = makeChain(A.des); makeSource(); await ctx.resume(); } catch (e) { aMsg('Audio start failed: ' + e.message, 'err'); }
+    try { A.chain = makeChain(A.des); makeSource(); await ctx.resume(); } catch (e) { if (generation !== audioGeneration || A.ctx !== ctx) return; aMsg('Audio start failed: ' + e.message, 'err'); stopAudio(); return; }
+    if (generation !== audioGeneration || A.ctx !== ctx) return;
     A.starting = false; aState();
   }
   function stopAudio() {
+    audioGeneration++;
     clearTimeout(A.rebuildTimer); stopSource();
     const ctx = A.ctx; A.ctx = null; A.chain = null; A.bus = null; A.master = null; A.srcGain = null; A.starting = false;
     if (ctx) { try { ctx.close(); } catch (e) { /* ignore */ } }
