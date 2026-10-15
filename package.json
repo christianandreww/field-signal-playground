@@ -1,0 +1,12 @@
+{
+  "name": "field-signal-playground",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "test": "node tests/run.js",
+    "test:browser": "node tests/browser.js",
+    "test:all": "npm test && npm run test:browser"
+  },
+  "engines": { "node": ">=20" },
+  "devDependencies": { "playwright": "1.64.1" }
+}

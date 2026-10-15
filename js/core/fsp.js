@@ -39,7 +39,9 @@ FSP.runSelfTests = function () {
 /* ---------- URL-hash state ---------- */
 // Format: #t=<activeTab>&<tabId>.<key>=<value>&...   (values are URI-encoded strings)
 FSP.state = (function () {
-  const binds = {}; let timer = 0; let activeTab = null; let restoring = false;
+  const binds = Object.create(null);
+  const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+  const safe = k => !['__proto__', 'constructor', 'prototype'].includes(k); let timer = 0; let activeTab = null; let restoring = false;
   function encode(active, params) {
     const out = []; if (active) out.push('t=' + encodeURIComponent(active));
     Object.keys(params || {}).forEach(tab => {
@@ -49,7 +51,7 @@ FSP.state = (function () {
     return out.join('&');
   }
   function decode(str) {
-    const res = { active: null, params: {} };
+    const res = { active: null, params: Object.create(null) };
     if (typeof str !== 'string') return res;
     str = str.replace(/^#/, '');
     str.split('&').forEach(pair => {
@@ -58,7 +60,9 @@ FSP.state = (function () {
       if (k === 't') { res.active = v; return; }
       const d = k.indexOf('.'); if (d <= 0 || d === k.length - 1) return;
       const tab = k.slice(0, d), key = k.slice(d + 1);
-      (res.params[tab] = res.params[tab] || {})[key] = v;
+      if (!safe(tab) || !safe(key)) return;
+      if (!own(res.params, tab)) res.params[tab] = Object.create(null);
+      res.params[tab][key] = v;
     });
     return res;
   }
@@ -70,14 +74,14 @@ FSP.state = (function () {
   return {
     encode, decode,
     // bind(tabId, {get: () => flatObject, set: (flatObjectOfStrings) => void}); set must tolerate missing/invalid keys.
-    bind(tabId, io) { binds[tabId] = io; },
+    bind(tabId, io) { if (!safe(tabId)) throw new Error('Invalid state binding'); binds[tabId] = io; },
     // modules call touch() after any user parameter change
     touch() { if (restoring || typeof window === 'undefined') return; clearTimeout(timer); timer = setTimeout(write, 200); },
     setActive(id) { activeTab = id; this.touch(); },
     restore(hash) {
       const d = decode(hash === undefined ? (typeof location !== 'undefined' ? location.hash : '') : hash);
       restoring = true;
-      try { Object.keys(d.params).forEach(tab => { if (binds[tab]) { try { binds[tab].set(d.params[tab]); } catch (e) { /* ignore bad state */ } } }); } finally { restoring = false; }
+      try { Object.keys(d.params).forEach(tab => { if (own(binds, tab)) { try { binds[tab].set(d.params[tab]); } catch (e) { /* ignore bad state */ } } }); } finally { restoring = false; }
       return d.active;
     },
     link() { return (typeof location !== 'undefined' ? location.href.split('#')[0] : '') + '#' + encode(activeTab, collect()); },
@@ -105,6 +109,12 @@ FSP.fmtEng = function (x, unit, digits) {
 
 /* ---------- DOM helpers (browser only; call from init/activate, never at load) ---------- */
 FSP.ui = {
+  modelNotes(panel, id) {
+    const notes = FSP.modelNotes && FSP.modelNotes[id]; if (!notes) return;
+    const list = FSP.ui.el('ul');
+    notes.forEach(text => list.appendChild(FSP.ui.el('li', { text })));
+    panel.appendChild(FSP.ui.el('details', { class: 'theory model-notes' }, FSP.ui.el('summary', { text: 'Model assumptions & limits' }), list));
+  },
   el(tag, props) {
     const e = document.createElement(tag); props = props || {};
     Object.keys(props).forEach(k => { if (k === 'class') e.className = props[k]; else if (k === 'text') e.textContent = props[k]; else if (k === 'html') e.innerHTML = props[k]; else if (k.slice(0, 2) === 'on') e.addEventListener(k.slice(2), props[k]); else e.setAttribute(k, props[k]); });
@@ -158,6 +168,7 @@ FSP.mountTabs = function (tablistEl, mainEl) {
     const sec = FSP.ui.el('section', { id: 'panel-' + d.id, role: 'tabpanel', 'aria-labelledby': 'tab-' + d.id, hidden: '' });
     tablistEl.appendChild(btn); mainEl.insertBefore(sec, document.getElementById('selftest-out'));
     try { if (d.init) d.init(sec); } catch (e) { sec.appendChild(FSP.ui.el('div', { class: 'msg bad', text: 'Failed to initialise ' + d.title + ': ' + e.message })); if (typeof console !== 'undefined') console.error(e); }
+    FSP.ui.modelNotes(sec, d.id);
     created.push(d);
   });
   return created;

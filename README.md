@@ -27,25 +27,40 @@ A zero-dependency, build-free engineering sandbox that runs by double-clicking `
 
 ```
 node tests/run.js        # all math/self-tests, no browser needed (Node 18+)
-node tests/browser.js    # optional: headless smoke test of every tab (needs Playwright + Chromium)
+node tests/browser.js    # browser regressions; requires the setup below
 ```
 
 In the page, append `?selftest` to the URL (or run `runSelfTests()` in the console) to run the same suite.
+
+For browser tests (Node 20+; development only; opening the app still needs no install):
+
+```
+npm ci
+npx playwright install chromium
+npm run test:all
+```
+
+Browser tests fail if Playwright or Chromium is missing. They exercise visible desktop navigation, keyboard focus across subjects, the mobile picker, custom-filter saved links, hostile URL state, and delayed microphone/worklet cancellation. Permission timing is mocked; no real microphone is accessed. `PW_MODULE` and `CHROMIUM` can point to an existing Playwright module or Chromium executable. GitHub Actions runs numerical checks on Node 18 and 22 and browser checks on Node 22 for pushes and pull requests.
 
 ## Layout
 
 ```
 index.html            shell + script tags (order matters; no ES modules, so file:// works)
 css/style.css
-js/core/              fsp.js (registry, URL state, UI helpers), prng.js, fft.js, v1-math.js (EM + biquad core, v1 tests)
-js/modules/           one file per tab: pure math in FSP.math.<name>, UI in init(), tests via FSP.registerTests
+js/core/              registries, safe URL state, UI helpers, model notes, PRNG, FFT, original EM/biquad core
+js/math/              extracted numerical code for fields, DSP design, transformers/actuators, rotating machines
+js/selftests/         extracted numerical checks and URL-state regressions (Node and browser)
+js/modules/           tab interfaces; older modules still include their numerical code and self-tests
 js/v1-ui.js           EM and DSP tab UI, tab switching, state restore
-tests/                run.js (Node), browser.js (Playwright smoke)
+tests/                run.js (Node), browser.js (Playwright regressions)
 prompts/              the prompts used to specify and generate this project
 ```
 
 ## Notes and limits
 
-- Audio (worklet/IIR chains, mic, tuner) cannot be exercised headlessly; those paths were checked for load/render and the pure math is unit tested.
+- Every tool includes a collapsible **Model assumptions & limits** note. These are teaching models; check the stated geometry, material data, sample rate, and operating assumptions before comparing against a real system.
+- Browser tests exercise real Web Audio contexts and graphs with controlled asynchronous permission/worklet responses. Actual microphone hardware, listening quality, and browser permission dialogs still need manual checks.
 - v1 noise comes from a never-repeating AudioWorklet generator (a 10 s crossfaded loop is used only when AudioWorklet is unavailable); the master output is a tanh soft clip (0.9 ceiling) rather than a compressor.
 - Machines models are teaching-level: induction motor has no separate core-loss branch, DC machine ignores armature reaction.
+
+See [Architecture and maintenance](docs/ARCHITECTURE.md) for script ordering, saved-state validation, audio cleanup, and adding a tool.

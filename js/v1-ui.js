@@ -25,6 +25,8 @@ function labelBox(ctx, text, x, y, align) {
 /* ---------- tabs & animation loops ---------- */
 let activeModule = 'em', emRaf = 0, dspRaf = 0;
 FSP.mountTabs(document.querySelector('.tabs'), document.querySelector('main'));
+FSP.ui.modelNotes($('panel-em'), 'em');
+FSP.ui.modelNotes($('panel-dsp'), 'dsp');
 /* Group the tab buttons by subject (desktop) and build the matching <select> picker (narrow screens). */
 const TAB_GROUPS = [
   ['Electromagnetics', ['em', 'fields', 'tline']],
@@ -58,6 +60,7 @@ const groupBtns = {}, groupWraps = {};
 const tabs = Array.from(document.querySelectorAll('[role=tab]'));
 function activateTab(id, focus) {
   const next = id.replace(/^tab-/, '');
+  showGroupFor(id); // Reveal the destination before focusing a tab in another subject.
   tabs.forEach(t => { const on = t.id === id; t.setAttribute('aria-selected', on ? 'true' : 'false'); t.tabIndex = on ? 0 : -1; $(t.getAttribute('aria-controls')).hidden = !on; if (on && focus) t.focus(); });
   if (next !== activeModule) {
     const prev = activeModule; activeModule = next;
@@ -71,7 +74,6 @@ function activateTab(id, focus) {
     startLoops();
     FSP.state.setActive(next);
   }
-  showGroupFor(id);
 }
 function showGroupFor(id) {
   const pk = $('tab-picker'); if (pk && pk.value !== id) pk.value = id;
@@ -541,13 +543,16 @@ function tanhCurve(points, ceiling) { // deterministic soft clip: y = ceiling ·
 function auMsg(text, cls) { const d = document.createElement('div'); d.className = 'msg ' + (cls || ''); d.textContent = text; $('au-msgs').appendChild(d); while ($('au-msgs').children.length > 4) $('au-msgs').firstChild.remove(); }
 function auClearMsgs() { $('au-msgs').innerHTML = ''; }
 function auState() { const b = $('au-state'); b.textContent = audio.ctx ? audio.ctx.state + ' @ ' + audio.ctx.sampleRate + ' Hz' + (audio.mode ? ' · ' + audio.mode : '') : 'no context'; b.className = 'badge ' + (audio.ctx && audio.ctx.state === 'running' ? 'ok' : audio.ctx ? 'warn' : ''); $('au-stop').disabled = !audio.ctx; $('au-start').textContent = audio.ctx && audio.ctx.state === 'suspended' ? 'Resume audio' : audio.ctx ? 'Running' : 'Start audio'; }
+let audioGeneration = 0, sourceGeneration = 0;
 async function startAudio() {
   auClearMsgs();
   if (audio.ctx) { try { await audio.ctx.resume(); } catch (e) { auMsg('Resume failed: ' + e.message, 'err'); } auState(); return; }
+  const generation = ++audioGeneration;
   const AC = window.AudioContext || window.webkitAudioContext;
   if (!AC) { auMsg('Web Audio API is not available in this browser.', 'err'); return; }
   let ctx; try { ctx = new AC({ sampleRate: dsp.fs }); } catch (e) { ctx = new AC(); }
   audio.ctx = ctx; ctx.addEventListener('statechange', auState);
+  auState(); // Publish the cancellable context before awaiting its worklet.
   if (ctx.sampleRate !== dsp.fs) auMsg('AudioContext runs at ' + ctx.sampleRate + ' Hz (selected fs was ' + dsp.fs + ' Hz). Coefficient math now uses the context rate.', 'warn');
   dspSetFs(ctx.sampleRate, true);
   audio.analyserIn = ctx.createAnalyser(); audio.analyserOut = ctx.createAnalyser();
@@ -560,10 +565,12 @@ async function startAudio() {
     if (!ctx.audioWorklet) throw new Error('AudioWorklet unavailable');
     const url = URL.createObjectURL(new Blob([WORKLET_SRC], { type: 'application/javascript' }));
     try { await ctx.audioWorklet.addModule(url); } finally { URL.revokeObjectURL(url); }
+    if (generation !== audioGeneration || audio.ctx !== ctx) return;
     audio.node = new AudioWorkletNode(ctx, 'biquad-df2t', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2] });
     audio.mode = 'AudioWorklet';
     audio.analyserIn.connect(audio.node); audio.node.connect(audio.wet);
   } catch (e) {
+    if (generation !== audioGeneration || audio.ctx !== ctx) return;
     audio.mode = 'IIRFilterNode fallback';
     auMsg('AudioWorklet unavailable (' + e.message + '). Using IIRFilterNode recreated on change with a 30 ms crossfade; noise sources loop a 10 s buffer with a crossfaded seam.', 'warn');
   }
@@ -572,6 +579,7 @@ async function startAudio() {
   dspApplyCookbookIfNotCustom();
   audioPushCoefs(dsp.lastStable || dsp.coefs, true);
   try { await ctx.resume(); } catch (e) { auMsg('Context could not resume: ' + e.message, 'err'); }
+  if (generation !== audioGeneration || audio.ctx !== ctx) return;
   await setSource($('au-source').value);
   auState();
 }
@@ -610,6 +618,7 @@ function makeSweepBuffer(ctx, dur) {
   return buf;
 }
 function stopSource() {
+  sourceGeneration++;
   if (audio.src) { try { audio.src.stop(); } catch (e) {} try { audio.src.disconnect(); } catch (e) {} audio.src = null; }
   if (audio.noise) { try { audio.noise.disconnect(); } catch (e) {} audio.noise.port.postMessage({ type: 'mode', mode: 'off' }); }
   if (audio.micStream) { audio.micStream.getTracks().forEach(t => t.stop()); audio.micStream = null; }
@@ -618,15 +627,18 @@ function stopSource() {
 async function setSource(kind) {
   const ctx = audio.ctx; if (!ctx) return;
   stopSource();
+  const generation = sourceGeneration;
   const warn = document.querySelector('#au-msgs .msg.feedback'); if (warn) warn.remove();
   if (kind === 'mic') {
     if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { auMsg('Microphone needs a secure context (https:// or localhost) and getUserMedia support.', 'err'); return; }
     try {
-      audio.micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }, video: false });
-      if (!audio.ctx) { audio.micStream.getTracks().forEach(t => t.stop()); audio.micStream = null; return; }
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }, video: false });
+      if (generation !== sourceGeneration || audio.ctx !== ctx) { stream.getTracks().forEach(t => t.stop()); return; }
+      audio.micStream = stream;
       audio.src = ctx.createMediaStreamSource(audio.micStream);
       const w = document.createElement('div'); w.className = 'msg warn feedback'; w.textContent = '⚠ Microphone → speakers can feed back. Use headphones or keep the master gain low.'; $('au-msgs').appendChild(w);
     } catch (e) {
+      if (generation !== sourceGeneration || audio.ctx !== ctx) return;
       const m = e.name === 'NotAllowedError' || e.name === 'SecurityError' ? 'Microphone permission denied.' : e.name === 'NotFoundError' || e.name === 'OverconstrainedError' ? 'No microphone device found.' : 'Microphone error: ' + e.message;
       auMsg(m, 'err'); return;
     }
@@ -647,6 +659,7 @@ async function setSource(kind) {
   audio.src.connect(audio.analyserIn);
 }
 function stopAudio(reason) {
+  audioGeneration++; sourceGeneration++;
   if (!audio.ctx) return;
   stopSource(); clearTimeout(audio.iirTimer);
   for (const n of [audio.node, audio.noise, audio.iir.node, audio.iir.gain, audio.analyserIn, audio.analyserOut, audio.wet, audio.dry, audio.master, audio.shaper]) { try { n && n.disconnect(); } catch (e) {} }
@@ -711,14 +724,37 @@ FSP.state.bind('em', {
   }
 });
 FSP.state.bind('dsp', {
-  get: () => ({ type: dsp.type, fc: dsp.fc, fs: dsp.fs, q: dsp.Q, g: dsp.gainDb }),
+  get: () => ({ type: dsp.type, fc: dsp.fc, fs: dsp.fs, q: dsp.Q, g: dsp.gainDb,
+    custom: dsp.custom ? 1 : 0, cs: dsp.custom ? JSON.stringify(coefArray(dsp.coefs)) : undefined,
+    norm: dsp.normalize ? 1 : 0, n: dsp.N, auto: dsp.autoRange ? 1 : 0 }),
   set: p => {
-    if (FILTER_NAMES[p.type]) dsp.type = p.type;
+    if (Object.prototype.hasOwnProperty.call(FILTER_NAMES, p.type)) dsp.type = p.type;
     const fs = parseFloat(p.fs); if (Number.isFinite(fs) && fs >= 3000 && fs <= 192000 && !audio.ctx) dspSetFs(fs, false);
     const fc = parseFloat(p.fc); if (Number.isFinite(fc)) dspSetFc(fc);
     const q = parseFloat(p.q); if (Number.isFinite(q)) { dsp.Q = clamp(q, 0.1, 20); $('dsp-q').value = dsp.Q; $('dsp-q-n').value = dsp.Q; }
     const g = parseFloat(p.g); if (Number.isFinite(g)) { dsp.gainDb = clamp(g, -24, 24); $('dsp-gain').value = dsp.gainDb; $('dsp-gain-n').value = dsp.gainDb; }
-    dspApplyCookbook();
+    if (p.norm === '0' || p.norm === '1') dsp.normalize = p.norm === '1';
+    if (p.auto === '0' || p.auto === '1') dsp.autoRange = p.auto === '1';
+    const n = Number(p.n); if (Number.isInteger(n) && n >= 16 && n <= 1024) dsp.N = n;
+    $('dsp-normgain').checked = dsp.normalize; $('dsp-autorange').checked = dsp.autoRange;
+    $('dsp-n').value = dsp.N; $('dsp-n-o').value = dsp.N;
+    // Coefficients preserve the exact edited response; do not renormalize on restore.
+    let custom = null;
+    if (p.custom === '1' && typeof p.cs === 'string' && p.cs.length <= 512) {
+      try {
+        const a = JSON.parse(p.cs);
+        if (Array.isArray(a) && a.length === 5 && a.every(v => Number.isFinite(v) && Math.abs(v) <= 1e12)) {
+          const c = { b0: a[0], b1: a[1], b2: a[2], a1: a[3], a2: a[4], a0raw: 1 };
+          const roots = rootsFromCoefs(c);
+          if (Math.abs(c.b0) >= 1e-12 && isStable(c) && roots.zeros.every(z => z.isFinite() && z.abs() <= 3 + 1e-9) && roots.poles.every(z => z.isFinite() && z.abs() <= 0.9999 + 1e-9)) custom = { c, roots };
+        }
+      } catch (e) { /* Malformed custom state falls back to the selected cookbook filter. */ }
+    }
+    if (custom) {
+      dsp.custom = true; dsp.coefs = custom.c; dsp.roots = custom.roots;
+      dsp.refLevel = freqResponseAt(dsp.coefs, 2 * Math.PI * refFreqFor(dsp.type, dsp.fc, dsp.fs) / dsp.fs).abs();
+      dspUpdateAll();
+    } else dspApplyCookbook();
   }
 });
 ['input', 'change', 'click'].forEach(ev => document.querySelector('main').addEventListener(ev, () => FSP.state.touch()));

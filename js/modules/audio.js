@@ -118,6 +118,7 @@
   /* ================= UI ================= */
   const S = { src: 'tone', wave: 'sine', freq: 440, level: -12, dbmin: -100, dbmax: -20, log: 1, a4: 440 };
   let ui = null, ac = null, g = null, raf = 0, running = false, active = false, frame = 0;
+  let startGeneration = 0, starting = false, fileGeneration = 0;
   let pitch = { f: null, d: null, note: null, hold: 0 };
   let sg = { cv: null, ctx: null };
 
@@ -155,6 +156,7 @@
     if (g.stream) { g.stream.getTracks().forEach(tr => { try { tr.stop(); } catch (e) { /* */ } }); g.stream = null; }
   }
   function stopAll() {
+    startGeneration++; starting = false;
     running = false; stopSources();
     if (raf) { cancelAnimationFrame(raf); raf = 0; }
     pitch = { f: null, d: null, note: null, hold: 0 };
@@ -162,14 +164,19 @@
   }
 
   async function start() {
-    if (running) { stopAll(); return; }
+    if (running || starting) { stopAll(); return; }
+    if (!active) return;
     msg('');
     if (S.src === 'mic') {
       const sn = secureNote(); if (sn) { msg(sn, 'warn'); return; }
     }
     if (S.src === 'file' && !(g && g.fileBuf)) { msg('Choose an audio file first (decoded in your browser; nothing is uploaded).', 'warn'); return; }
     if (!ensureCtx()) return;
+    const generation = ++startGeneration, context = ac, source = S.src;
+    const current = () => generation === startGeneration && active && ac === context && S.src === source;
+    starting = true; ui.start.textContent = 'Cancel'; ui.start.setAttribute('aria-pressed', 'true');
     try { if (ac.state === 'suspended') await ac.resume(); } catch (e) { /* ignore */ }
+    if (!current()) return;
     stopSources();
     try {
       if (S.src === 'tone') {
@@ -184,28 +191,34 @@
         let stream;
         try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } }); }
         catch (e) {
+          if (!current()) return;
+          starting = false; ui.start.textContent = 'Start'; ui.start.setAttribute('aria-pressed', 'false');
           const nm = e && e.name;
           msg(nm === 'NotAllowedError' || nm === 'SecurityError' ? 'Microphone permission was denied. Allow mic access in the browser address bar, or use the tone generator or a file instead.' : nm === 'NotFoundError' ? 'No microphone was found on this device.' : 'Could not open the microphone (' + (e && e.message || nm || 'unknown error') + ').', 'err');
           return;
         }
+        if (!current()) { stream.getTracks().forEach(tr => tr.stop()); return; }
         g.stream = stream; g.micNode = ac.createMediaStreamSource(stream); g.micNode.connect(g.bus); g.mon.gain.value = 0;
       }
-    } catch (e) { msg('Could not start audio: ' + (e && e.message || e), 'err'); stopSources(); return; }
-    running = true; ui.start.textContent = 'Stop'; ui.start.setAttribute('aria-pressed', 'true');
+    } catch (e) { if (!current()) return; msg('Could not start audio: ' + (e && e.message || e), 'err'); stopAll(); return; }
+    starting = false; running = true; ui.start.textContent = 'Stop'; ui.start.setAttribute('aria-pressed', 'true');
     if (active && !raf) raf = requestAnimationFrame(loop);
   }
 
   async function loadFile(file) {
     if (!file) return;
     if (!ensureCtx()) return;
+    const generation = ++fileGeneration;
     try {
       const ab = await file.arrayBuffer();
+      if (generation !== fileGeneration) return;
       const buf = await new Promise((res, rej) => { const p = ac.decodeAudioData(ab, res, rej); if (p && p.catch) p.catch(rej); });
+      if (generation !== fileGeneration) return;
       g.fileBuf = buf;
       ui.fileInfo.textContent = file.name + ' — ' + buf.duration.toFixed(1) + ' s, ' + buf.numberOfChannels + ' ch, ' + buf.sampleRate + ' Hz';
       msg('');
       if (running && S.src === 'file') { stopAll(); start(); }
-    } catch (e) { g.fileBuf = null; ui.fileInfo.textContent = 'No file loaded'; msg('Could not decode that file (' + (e && e.message || 'unsupported format') + ').', 'err'); }
+    } catch (e) { if (generation !== fileGeneration) return; g.fileBuf = null; ui.fileInfo.textContent = 'No file loaded'; msg('Could not decode that file (' + (e && e.message || 'unsupported format') + ').', 'err'); }
   }
 
   /* ---------- drawing ---------- */
@@ -359,7 +372,7 @@
     const sn = secureNote(); if (sn) { ui.msg.textContent = sn; ui.msg.className = 'msg warn'; ui.msg.style.display = ''; }
 
     const src = U.fieldset(panel, 'Source');
-    ui.srcSel = U.select(src, 'Input', [['tone', 'Tone generator'], ['file', 'Audio file (looped)'], ['mic', 'Microphone']], S.src, v => { S.src = v; if (running) stopAll(); syncUi(); FSP.state.touch(); });
+    ui.srcSel = U.select(src, 'Input', [['tone', 'Tone generator'], ['file', 'Audio file (looped)'], ['mic', 'Microphone']], S.src, v => { S.src = v; stopAll(); syncUi(); FSP.state.touch(); });
     const row = el('div', { class: 'row' }); src.appendChild(row);
     ui.start = U.button(row, 'Start', () => { start(); }); ui.start.setAttribute('aria-pressed', 'false');
     ui.toneBox = el('div'); src.appendChild(ui.toneBox);
@@ -391,6 +404,7 @@
     lr.appendChild(ui.logCb); lr.appendChild(el('label', { for: 'audio-log', text: 'Logarithmic frequency axis' }));
 
     ui.work = U.working(panel);
+    window.addEventListener('pagehide', stopAll);
     syncUi(); updateReadouts();
   }
 
