@@ -334,7 +334,16 @@
   }
 
   /* ----- drawing ----- */
-  const COL = { grid: '#2b3a55', gridHi: '#3d5278', text: '#8b98ab', fg: '#e6edf3', acc: '#4cc9f0', org: '#f9a03f', pink: '#f72585', ok: '#2ecc71' };
+  const COL = {
+    get grid() { return FSP.ui.color('--border', '#2b3a55'); },
+    get gridHi() { return FSP.ui.color('--border-strong', '#3d5278'); },
+    get text() { return FSP.ui.color('--muted', '#8b98ab'); },
+    get fg() { return FSP.ui.color('--text', '#e6edf3'); },
+    get acc() { return FSP.ui.color('--chart-blue', '#4cc9f0'); },
+    get org() { return FSP.ui.color('--chart-orange', '#f9a03f'); },
+    get pink() { return FSP.ui.color('--pink', '#f72585'); },
+    get ok() { return FSP.ui.color('--ok', '#2ecc71'); }
+  };
   const mono = () => (typeof getComputedStyle !== 'undefined' ? getComputedStyle(document.body).getPropertyValue('--mono') : '') || 'monospace';
 
   function drawSmith() {

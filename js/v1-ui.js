@@ -76,6 +76,7 @@ function activateTab(id, focus) {
   }
 }
 function showGroupFor(id) {
+  if (FSP.studio) FSP.studio.activate(id.replace(/^tab-/, ''));
   const pk = $('tab-picker'); if (pk && pk.value !== id) pk.value = id;
   const g = tabGroupOf[id]; if (!g) return; lastInGroup[g] = id;
   Object.keys(groupWraps).forEach(k => { groupWraps[k].hidden = k !== g; groupBtns[k].setAttribute('aria-pressed', String(k === g)); });
@@ -84,7 +85,7 @@ tabs.forEach((t, i) => {
   t.addEventListener('click', () => activateTab(t.id, false));
   t.addEventListener('keydown', e => {
     let j = null;
-    if (e.key === 'ArrowRight') j = (i + 1) % tabs.length; else if (e.key === 'ArrowLeft') j = (i - 1 + tabs.length) % tabs.length;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') j = (i + 1) % tabs.length; else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') j = (i - 1 + tabs.length) % tabs.length;
     else if (e.key === 'Home') j = 0; else if (e.key === 'End') j = tabs.length - 1;
     if (j !== null) { e.preventDefault(); activateTab(tabs[j].id, true); }
   });
@@ -99,7 +100,7 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) stopL
 
 /* ===================== MODULE 1: EM ===================== */
 const em = { theta: 45, pol: 'TE', logf: 9, er1: 1, mr1: 1, s1: 0, er2: 2.25, mr2: 1, s2: 0, span: 10, speed: 1, playing: true,
-  quality: 240, arrows: 'inst', field: 'A', phase: 0, lastTs: 0, dirty: true, cache: null, an: null, m1: null, m2: null, oc: null, img: null, hudT: 0, rtDirty: true };
+  quality: 240, arrows: 'off', field: 'A', phase: 0, lastTs: 0, dirty: true, cache: null, an: null, m1: null, m2: null, oc: null, img: null, hudT: 0, rtDirty: true };
 const EM_LUT = (() => { // diverging colormap: blue (−1) → dark (0) → orange (+1)
   const stops = [[-1, [60, 140, 255]], [-0.5, [34, 70, 150]], [0, [14, 18, 30]], [0.5, [160, 60, 40]], [1, [255, 150, 70]]];
   const lut = new Uint8ClampedArray(256 * 3);
@@ -167,6 +168,7 @@ function emRecompute() {
 }
 function emUpdateHud() {
   const an = em.an, m1 = em.m1, m2 = em.m2, f = m1.freq;
+  if (FSP.studio) FSP.studio.updateEm(an);
   $('em-freq-o').value = fmtSI(f, 'Hz'); $('em-lambda0').textContent = fmtSI(an.lambda0, 'm'); $('em-span-o').value = em.span.toFixed(1);
   $('em-n1').textContent = m1.nReal.toFixed(4) + (m1.lossy ? '  (n_c = ' + fmtComplexN(m1.nc) + ')' : '');
   $('em-n2').textContent = m2.nReal.toFixed(4) + (m2.lossy ? '  (n_c = ' + fmtComplexN(m2.nc) + ')' : '');
@@ -308,11 +310,11 @@ function emDrawRT() { // curves rendered once into an offscreen canvas; the mark
   em.rtOc.width = Math.round(w * dpr); em.rtOc.height = Math.round(h * dpr);
   const ctx = em.rtOc.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   const L = 40, R = 12, T = 10, B = 22, pw = w - L - R, ph = h - T - B;
-  ctx.fillStyle = '#121826'; ctx.fillRect(0, 0, w, h);
-  ctx.strokeStyle = '#243047'; ctx.lineWidth = 1; ctx.font = '11px ' + getComputedStyle(document.body).getPropertyValue('--mono'); ctx.fillStyle = '#8b98ab';
+  ctx.fillStyle = FSP.ui.color('--panel', '#121826'); ctx.fillRect(0, 0, w, h);
+  ctx.strokeStyle = FSP.ui.color('--border', '#243047'); ctx.lineWidth = 1; ctx.font = '11px ' + getComputedStyle(document.body).getPropertyValue('--mono'); ctx.fillStyle = FSP.ui.color('--muted', '#8b98ab');
   for (let v = 0; v <= 1; v += 0.25) { const y = T + ph * (1 - v); ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(w - R, y); ctx.stroke(); ctx.textAlign = 'right'; ctx.fillText(v.toFixed(2), L - 4, y + 4); }
   for (let d = 0; d <= 90; d += 15) { const x = L + pw * d / 90; ctx.beginPath(); ctx.moveTo(x, T); ctx.lineTo(x, T + ph); ctx.stroke(); ctx.textAlign = 'center'; ctx.fillText(d + '°', x, h - 6); }
-  const series = [['TE', 'R', '#4cc9f0'], ['TE', 'T', '#2ecc71'], ['TM', 'R', '#f9a03f'], ['TM', 'T', '#f72585']];
+  const series = [['TE', 'R', FSP.ui.color('--chart-blue', '#4cc9f0')], ['TE', 'T', FSP.ui.color('--ok', '#2ecc71')], ['TM', 'R', FSP.ui.color('--chart-orange', '#f9a03f')], ['TM', 'T', FSP.ui.color('--pink', '#f72585')]];
   const N = 181;
   for (const [pol, key, col] of series) {
     ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.beginPath(); let started = false;
@@ -326,10 +328,10 @@ function emDrawRTMarker() {
   const cv = $('em-rt'), { ctx, w, h } = prepCanvas(cv), i = em.rtCanvasInfo; if (!i || !em.rtOc) return;
   ctx.drawImage(em.rtOc, 0, 0, w, h);
   const x = i.L + i.pw * em.theta / 90;
-  ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.moveTo(x, i.T); ctx.lineTo(x, i.T + i.ph); ctx.stroke(); ctx.setLineDash([]);
+  ctx.strokeStyle = FSP.ui.color('--text', '#ffffff'); ctx.lineWidth = 1; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.moveTo(x, i.T); ctx.lineTo(x, i.T + i.ph); ctx.stroke(); ctx.setLineDash([]);
   const an = em.an; if (!an) return;
-  ctx.fillStyle = em.pol === 'TE' ? '#4cc9f0' : '#f9a03f'; ctx.beginPath(); ctx.arc(x, i.T + i.ph * (1 - clamp(an.R, 0, 1)), 4, 0, 7); ctx.fill();
-  ctx.fillStyle = em.pol === 'TE' ? '#2ecc71' : '#f72585'; ctx.beginPath(); ctx.arc(x, i.T + i.ph * (1 - clamp(an.T, 0, 1)), 4, 0, 7); ctx.fill();
+  ctx.fillStyle = em.pol === 'TE' ? FSP.ui.color('--chart-blue', '#4cc9f0') : FSP.ui.color('--chart-orange', '#f9a03f'); ctx.beginPath(); ctx.arc(x, i.T + i.ph * (1 - clamp(an.R, 0, 1)), 4, 0, 7); ctx.fill();
+  ctx.fillStyle = em.pol === 'TE' ? FSP.ui.color('--ok', '#2ecc71') : FSP.ui.color('--pink', '#f72585'); ctx.beginPath(); ctx.arc(x, i.T + i.ph * (1 - clamp(an.T, 0, 1)), 4, 0, 7); ctx.fill();
 }
 /* ===================== MODULE 2: DSP ===================== */
 const dsp = { type: 'lp', fc: 1000, fs: 48000, Q: 0.7071, gainDb: 0, N: 128, custom: false, normalize: true, autoRange: false,
@@ -402,32 +404,32 @@ const F_TICKS = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 5000
 const fmtHz = f => f >= 1000 ? (f / 1000).toFixed(f >= 10000 ? 0 : 1).replace(/\.0$/, '') + 'k' : f.toFixed(0);
 function plotFrame(cv, L, R, T, B) {
   const { ctx, w, h } = prepCanvas(cv);
-  ctx.fillStyle = '#121826'; ctx.fillRect(0, 0, w, h); ctx.font = '11px ' + MONO(); ctx.lineWidth = 1;
+  ctx.fillStyle = FSP.ui.color('--panel', '#121826'); ctx.fillRect(0, 0, w, h); ctx.font = '11px ' + MONO(); ctx.lineWidth = 1;
   return { ctx, w, h, L, R, T, B, pw: w - L - R, ph: h - T - B };
 }
 function drawLogGrid(P, fmin, fmax, nice) {
   const { ctx } = P, xf = logX(fmin, fmax, P.L, P.L + P.pw);
-  ctx.strokeStyle = '#243047'; ctx.fillStyle = '#8b98ab'; ctx.textAlign = 'center';
+  ctx.strokeStyle = FSP.ui.color('--border', '#243047'); ctx.fillStyle = FSP.ui.color('--muted', '#8b98ab'); ctx.textAlign = 'center';
   for (const f of F_TICKS) { if (f < fmin || f > fmax) continue; const x = xf(f); ctx.beginPath(); ctx.moveTo(x, P.T); ctx.lineTo(x, P.T + P.ph); ctx.stroke(); ctx.fillText(fmtHz(f), x, P.h - 6); }
-  if (nice) { for (let d = 1; d < 10; d++) for (const e of [10, 100, 1000, 10000]) { const f = d * e; if (f > fmin && f < fmax && !F_TICKS.includes(f)) { const x = xf(f); ctx.strokeStyle = '#1a2233'; ctx.beginPath(); ctx.moveTo(x, P.T); ctx.lineTo(x, P.T + P.ph); ctx.stroke(); } } }
+  if (nice) { for (let d = 1; d < 10; d++) for (const e of [10, 100, 1000, 10000]) { const f = d * e; if (f > fmin && f < fmax && !F_TICKS.includes(f)) { const x = xf(f); ctx.strokeStyle = FSP.ui.color('--grid-subtle', '#1a2233'); ctx.beginPath(); ctx.moveTo(x, P.T); ctx.lineTo(x, P.T + P.ph); ctx.stroke(); } } }
   return xf;
 }
 function drawYGrid(P, y0, y1, step, unit) {
   const { ctx } = P, yf = v => P.T + P.ph * (1 - (v - y0) / (y1 - y0));
-  ctx.strokeStyle = '#243047'; ctx.fillStyle = '#8b98ab'; ctx.textAlign = 'right';
+  ctx.strokeStyle = FSP.ui.color('--border', '#243047'); ctx.fillStyle = FSP.ui.color('--muted', '#8b98ab'); ctx.textAlign = 'right';
   for (let v = Math.ceil(y0 / step) * step; v <= y1 + 1e-9; v += step) { const y = yf(v); ctx.beginPath(); ctx.moveTo(P.L, y); ctx.lineTo(P.L + P.pw, y); ctx.stroke(); ctx.fillText(v.toFixed(0) + unit, P.L - 4, y + 4); }
   return yf;
 }
-function fcMarker(P, xf) { const x = xf(dsp.fc); P.ctx.strokeStyle = 'rgba(249,160,63,0.8)'; P.ctx.setLineDash([4, 4]); P.ctx.beginPath(); P.ctx.moveTo(x, P.T); P.ctx.lineTo(x, P.T + P.ph); P.ctx.stroke(); P.ctx.setLineDash([]); P.ctx.fillStyle = '#f9a03f'; P.ctx.textAlign = 'left'; P.ctx.fillText('fc', x + 3, P.T + 11); }
+function fcMarker(P, xf) { const x = xf(dsp.fc); P.ctx.strokeStyle = 'rgba(249,160,63,0.8)'; P.ctx.setLineDash([4, 4]); P.ctx.beginPath(); P.ctx.moveTo(x, P.T); P.ctx.lineTo(x, P.T + P.ph); P.ctx.stroke(); P.ctx.setLineDash([]); P.ctx.fillStyle = FSP.ui.color('--chart-orange', '#f9a03f'); P.ctx.textAlign = 'left'; P.ctx.fillText('fc', x + 3, P.T + 11); }
 function cursorMarker(P, xf) { if (dsp.cursorF === null) return; const x = xf(dsp.cursorF); P.ctx.strokeStyle = 'rgba(255,255,255,0.7)'; P.ctx.beginPath(); P.ctx.moveTo(x, P.T); P.ctx.lineTo(x, P.T + P.ph); P.ctx.stroke(); }
 function dspDrawMag() {
   const P = plotFrame($('dsp-mag'), 46, 12, 10, 20), r = dsp.resp;
   let y0 = -60, y1 = 30;
   if (dsp.autoRange) { let mn = Infinity, mx = -Infinity; for (const v of r.mag) { if (v < mn) mn = v; if (v > mx) mx = v; } y0 = Math.floor((mn - 5) / 10) * 10; y1 = Math.ceil((mx + 5) / 10) * 10; if (y1 - y0 < 20) y1 = y0 + 20; }
   const xf = drawLogGrid(P, r.fmin, r.fmax, true), yf = drawYGrid(P, y0, y1, (y1 - y0) > 100 ? 20 : 10, '');
-  P.ctx.fillStyle = '#8b98ab'; P.ctx.textAlign = 'left'; P.ctx.fillText('|H| dB', P.L + 4, P.T + 11);
+  P.ctx.fillStyle = FSP.ui.color('--muted', '#8b98ab'); P.ctx.textAlign = 'left'; P.ctx.fillText('|H| dB', P.L + 4, P.T + 11);
   fcMarker(P, xf);
-  P.ctx.strokeStyle = '#4cc9f0'; P.ctx.lineWidth = 2; P.ctx.beginPath();
+  P.ctx.strokeStyle = FSP.ui.color('--chart-blue', '#4cc9f0'); P.ctx.lineWidth = 2; P.ctx.beginPath();
   for (let i = 0; i < r.freqs.length; i++) { const x = xf(r.freqs[i]), y = clamp(yf(r.mag[i]), P.T - 2, P.T + P.ph + 2); if (i) P.ctx.lineTo(x, y); else P.ctx.moveTo(x, y); }
   P.ctx.stroke(); cursorMarker(P, xf);
 }
@@ -436,9 +438,9 @@ function dspDrawPhase() {
   let mn = Infinity, mx = -Infinity; for (const v of r.phase) { if (v < mn) mn = v; if (v > mx) mx = v; }
   const y0 = Math.floor(mn / 45) * 45, y1 = Math.max(y0 + 45, Math.ceil(mx / 45) * 45);
   const xf = drawLogGrid(P, r.fmin, r.fmax, false), yf = drawYGrid(P, y0, y1, (y1 - y0) > 360 ? 90 : 45, '°');
-  P.ctx.fillStyle = '#8b98ab'; P.ctx.textAlign = 'left'; P.ctx.fillText('∠H (unwrapped)', P.L + 4, P.T + 11);
+  P.ctx.fillStyle = FSP.ui.color('--muted', '#8b98ab'); P.ctx.textAlign = 'left'; P.ctx.fillText('∠H (unwrapped)', P.L + 4, P.T + 11);
   fcMarker(P, xf);
-  P.ctx.strokeStyle = '#f72585'; P.ctx.lineWidth = 2; P.ctx.beginPath();
+  P.ctx.strokeStyle = FSP.ui.color('--pink', '#f72585'); P.ctx.lineWidth = 2; P.ctx.beginPath();
   for (let i = 0; i < r.freqs.length; i++) { const x = xf(r.freqs[i]), y = yf(r.phase[i]); if (i) P.ctx.lineTo(x, y); else P.ctx.moveTo(x, y); }
   P.ctx.stroke(); cursorMarker(P, xf);
 }
@@ -446,12 +448,12 @@ function dspDrawImpulse() {
   const P = plotFrame($('dsp-impulse'), 46, 12, 10, 20), h = dsp.h, n = dsp.hLen;
   let mx = 1e-12; for (let i = 0; i < n; i++) mx = Math.max(mx, Math.abs(h[i]));
   const yf = v => P.T + P.ph * (1 - (v + mx) / (2 * mx)), xf = i => P.L + P.pw * (i + 0.5) / n;
-  const { ctx } = P; ctx.strokeStyle = '#243047'; ctx.fillStyle = '#8b98ab';
+  const { ctx } = P; ctx.strokeStyle = FSP.ui.color('--border', '#243047'); ctx.fillStyle = FSP.ui.color('--muted', '#8b98ab');
   for (const v of [-1, -0.5, 0, 0.5, 1]) { const y = yf(v * mx); ctx.beginPath(); ctx.moveTo(P.L, y); ctx.lineTo(P.L + P.pw, y); ctx.stroke(); ctx.textAlign = 'right'; ctx.fillText((v * mx).toPrecision(2), P.L - 4, y + 4); }
   ctx.textAlign = 'center'; const step = n <= 32 ? 4 : n <= 128 ? 16 : n <= 512 ? 64 : 128;
   for (let i = 0; i < n; i += step) ctx.fillText(String(i), xf(i), P.h - 6);
   labelBox(ctx, 'h[n] via DF-II-T · showing ' + n + ' of ' + dsp.N + (n < dsp.N ? ' (auto-trimmed: |h| < 1e-6 beyond)' : ''), P.L + 4, P.T + 13);
-  ctx.strokeStyle = '#2ecc71'; ctx.fillStyle = '#2ecc71'; ctx.lineWidth = n > 300 ? 1 : 1.5;
+  ctx.strokeStyle = FSP.ui.color('--ok', '#2ecc71'); ctx.fillStyle = FSP.ui.color('--ok', '#2ecc71'); ctx.lineWidth = n > 300 ? 1 : 1.5;
   const y0 = yf(0), rad = n > 300 ? 1 : n > 128 ? 1.5 : 2.5;
   for (let i = 0; i < n; i++) { const x = xf(i), y = yf(h[i]); ctx.beginPath(); ctx.moveTo(x, y0); ctx.lineTo(x, y); ctx.stroke(); ctx.beginPath(); ctx.arc(x, y, rad, 0, 7); ctx.fill(); }
 }
@@ -476,20 +478,20 @@ function zGeom() {
 function dspDrawZplane() {
   if ($('dsp-zplane').getBoundingClientRect().width < 40) return; // hidden panel
   const { ctx, w, h } = prepCanvas($('dsp-zplane')), g = zGeom(), { cx, cy, R } = g;
-  ctx.fillStyle = '#121826'; ctx.fillRect(0, 0, w, h); ctx.font = '11px ' + MONO();
-  ctx.strokeStyle = '#1e293b'; ctx.lineWidth = 1;
+  ctx.fillStyle = FSP.ui.color('--panel', '#121826'); ctx.fillRect(0, 0, w, h); ctx.font = '11px ' + MONO();
+  ctx.strokeStyle = FSP.ui.color('--grid-subtle', '#1e293b'); ctx.lineWidth = 1;
   for (let v = -Math.floor(g.view * 2) / 2; v <= g.view; v += 0.5) { const x = cx + v * R, y = cy - v * R; ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
-  ctx.strokeStyle = '#3b4a63'; ctx.beginPath(); ctx.moveTo(0, cy); ctx.lineTo(w, cy); ctx.stroke(); ctx.beginPath(); ctx.moveTo(cx, 0); ctx.lineTo(cx, h); ctx.stroke();
-  ctx.strokeStyle = '#8b98ab'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(cx, cy, R, 0, 7); ctx.stroke();
-  ctx.fillStyle = '#8b98ab'; ctx.textAlign = 'left'; ctx.fillText('Re', w - 20, cy - 4); ctx.fillText('Im', cx + 4, 12); ctx.fillText('|z|=1', cx + R * 0.72, cy - R * 0.72);
+  ctx.strokeStyle = FSP.ui.color('--border-strong', '#3b4a63'); ctx.beginPath(); ctx.moveTo(0, cy); ctx.lineTo(w, cy); ctx.stroke(); ctx.beginPath(); ctx.moveTo(cx, 0); ctx.lineTo(cx, h); ctx.stroke();
+  ctx.strokeStyle = FSP.ui.color('--muted', '#8b98ab'); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(cx, cy, R, 0, 7); ctx.stroke();
+  ctx.fillStyle = FSP.ui.color('--muted', '#8b98ab'); ctx.textAlign = 'left'; ctx.fillText('Re', w - 20, cy - 4); ctx.fillText('Im', cx + 4, 12); ctx.fillText('|z|=1', cx + R * 0.72, cy - R * 0.72);
   ctx.fillText('z-plane · ' + (dsp.custom ? 'custom roots' : FILTER_NAMES[dsp.type]), 6, h - 6);
   const drawSet = (arr, kind) => {
     const dbl = arr[0].sub(arr[1]).abs() < 1e-7;
     arr.forEach((z, i) => {
       if (dbl && i === 1) return;
       const x = cx + z.re * R, y = cy - z.im * R, sel = dsp.sel && dsp.sel.kind === kind && (dsp.sel.idx === i || (dbl && dsp.sel.idx === 1));
-      ctx.lineWidth = sel ? 3 : 2; ctx.strokeStyle = kind === 'pole' ? '#ff5c5c' : '#4cc9f0';
-      if (sel) { ctx.fillStyle = 'rgba(255,255,255,0.12)'; ctx.beginPath(); ctx.arc(x, y, 13, 0, 7); ctx.fill(); }
+      ctx.lineWidth = sel ? 3 : 2; ctx.strokeStyle = kind === 'pole' ? FSP.ui.color('--bad', '#ff5c5c') : FSP.ui.color('--chart-blue', '#4cc9f0');
+      if (sel) { ctx.fillStyle = FSP.ui.color('--focus-fill', 'rgba(255,255,255,0.12)'); ctx.beginPath(); ctx.arc(x, y, 13, 0, 7); ctx.fill(); }
       if (kind === 'pole') { ctx.beginPath(); ctx.moveTo(x - 6, y - 6); ctx.lineTo(x + 6, y + 6); ctx.moveTo(x + 6, y - 6); ctx.lineTo(x - 6, y + 6); ctx.stroke(); }
       else { ctx.beginPath(); ctx.arc(x, y, 6, 0, 7); ctx.stroke(); }
       if (dbl) { ctx.fillStyle = ctx.strokeStyle; ctx.fillText('×2', x + 8, y - 8); }
@@ -685,7 +687,7 @@ function dspDrawSpectrum() {
   const P = plotFrame($('dsp-spectrum'), 46, 12, 10, 20), { ctx } = P;
   const fs = dsp.fs, fmin = 20, fmax = fs / 2;
   const xf = drawLogGrid(P, fmin, fmax, true), yf = drawYGrid(P, -100, 0, 20, '');
-  ctx.fillStyle = '#8b98ab'; ctx.textAlign = 'left';
+  ctx.fillStyle = FSP.ui.color('--muted', '#8b98ab'); ctx.textAlign = 'left';
   if (!audio.ctx || audio.ctx.state !== 'running') { ctx.fillText('Spectrum analyzer (fftSize 4096) — start audio to see input (dim) and filtered output (bright).', P.L + 4, P.T + 11); fcMarker(P, xf); return; }
   audio.analyserIn.getFloatFrequencyData(audio.inData); audio.analyserOut.getFloatFrequencyData(audio.outData);
   const binHz = audio.ctx.sampleRate / audio.analyserIn.fftSize, nb = audio.inData.length, cols = Math.max(2, Math.floor(P.pw));
@@ -693,14 +695,14 @@ function dspDrawSpectrum() {
   const inCol = new Float32Array(cols), outCol = new Float32Array(cols), fcol = new Float32Array(cols);
   for (let i = 0; i < cols; i++) { const f = inv(i + 0.5); fcol[i] = f; inCol[i] = clamp(sample(audio.inData, f), -100, 0); outCol[i] = clamp(sample(audio.outData, f), -100, 0); }
   const line = (arr, color, lw) => { ctx.strokeStyle = color; ctx.lineWidth = lw; ctx.beginPath(); for (let i = 0; i < cols; i++) { const x = P.L + i + 0.5, y = yf(arr[i]); if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); } ctx.stroke(); };
-  line(inCol, 'rgba(139,152,171,0.55)', 1); line(outCol, '#4cc9f0', 1.6);
+  line(inCol, 'rgba(139,152,171,0.55)', 1); line(outCol, FSP.ui.color('--chart-blue', '#4cc9f0'), 1.6);
   if ($('au-showh').checked && dsp.lastStable) {
     const sorted = Array.from(inCol).filter(v => v > -99).sort((a, b) => a - b), off = sorted.length ? sorted[sorted.length >> 1] : -60;
     const hc = new Float32Array(cols); for (let i = 0; i < cols; i++) hc[i] = clamp(off + magDb(freqResponseAt(dsp.lastStable, 2 * Math.PI * fcol[i] / fs)), -100, 0);
-    ctx.setLineDash([5, 4]); line(hc, '#f9a03f', 1.2); ctx.setLineDash([]);
-    ctx.fillStyle = '#f9a03f'; ctx.fillText('|H| overlay (offset to input median ' + off.toFixed(0) + ' dB)', P.L + 4, P.T + 24);
+    ctx.setLineDash([5, 4]); line(hc, FSP.ui.color('--chart-orange', '#f9a03f'), 1.2); ctx.setLineDash([]);
+    ctx.fillStyle = FSP.ui.color('--chart-orange', '#f9a03f'); ctx.fillText('|H| overlay (offset to input median ' + off.toFixed(0) + ' dB)', P.L + 4, P.T + 24);
   }
-  ctx.fillStyle = '#8b98ab'; ctx.fillText('in (dim) / out (bright) · ' + audio.srcKind + (audio.bypass ? ' · BYPASS' : '') + ' · dBFS', P.L + 4, P.T + 11);
+  ctx.fillStyle = FSP.ui.color('--muted', '#8b98ab'); ctx.fillText('in (dim) / out (bright) · ' + audio.srcKind + (audio.bypass ? ' · BYPASS' : '') + ' · dBFS', P.L + 4, P.T + 11);
   fcMarker(P, xf);
 }
 function dspFrame() {
@@ -768,3 +770,9 @@ showGroupFor('tab-em');
 { const want = FSP.state.restore(); if (want && want !== 'em' && $('tab-' + want)) activateTab('tab-' + want, false); else FSP.state.setActive('em'); }
 if (/selftest/.test(location.search)) { const res = FSP.runSelfTests(); const pre = $('selftest-out'); pre.hidden = false; pre.textContent = res.lines.join('\n'); }
 window.runSelfTests = FSP.runSelfTests;
+// Appearance changes redraw presentation only; they never restart audio or reset designs.
+FSP.redrawActive = function () {
+  if (activeModule === 'em') { em.dirty = true; em.rtDirty = true; }
+  else if (activeModule === 'dsp') dspRedrawAll();
+  else { const tab = FSP.tabs.find(t => t.id === activeModule); if (tab && tab.activate) tab.activate(); }
+};

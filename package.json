@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "test": "node tests/run.js",
-    "test:browser": "node tests/browser.js",
+    "test:browser": "node tests/browser.js && node tests/studio.js",
     "test:all": "npm test && npm run test:browser"
   },
   "engines": { "node": ">=20" },

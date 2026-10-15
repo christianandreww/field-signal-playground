@@ -23,6 +23,14 @@ A zero-dependency, build-free engineering sandbox that runs by double-clicking `
 - Open `index.html` in a browser. No server, no install.
 - Microphone input needs `https` or `localhost` (browser rule); everything else works from `file://`.
 
+## Your workspace
+
+Choose a subject in the desktop sidebar or a tool in the mobile picker. The four subject identities are EE3101 (teal), IE3014 (violet), IE3017 (emerald), and EE2005 (copper). Each tool includes a **What to try** prompt.
+
+The appearance selector offers Light, Dark, and System independently of the subject. This preference stays on your device when storage is available; shared links continue to describe the experiment, rather than the appearance. Appearance changes redraw plots without starting audio or resetting a filter.
+
+The wave tool leads with its visualization and three key results. Start with an example, adjust the angle and polarization, and expand **Material properties**, **Display options**, or **Detailed results & angle sweep** when needed. Field arrows are off initially and can be enabled in Display options. On mobile, the graph comes first, controls follow, and detailed theory stays below them. Reduced-motion preferences start the wave animation paused.
+
 ## Test
 
 ```
@@ -46,13 +54,15 @@ Browser tests fail if Playwright or Chromium is missing. They exercise visible d
 
 ```
 index.html            shell + script tags (order matters; no ES modules, so file:// works)
-css/style.css
+css/style.css         base controls and module styles
+css/studio.css        responsive Lab Studio shell, appearance and subject palettes
 js/core/              registries, safe URL state, UI helpers, model notes, PRNG, FFT, original EM/biquad core
 js/math/              extracted numerical code for fields, DSP design, transformers/actuators, rotating machines
 js/selftests/         extracted numerical checks and URL-state regressions (Node and browser)
 js/modules/           tab interfaces; older modules still include their numerical code and self-tests
 js/v1-ui.js           EM and DSP tab UI, tab switching, state restore
-tests/                run.js (Node), browser.js (Playwright regressions)
+js/studio-ui.js       course identity, tool introductions, guided prompts, wave layout
+tests/                run.js (Node), browser.js and studio.js (Playwright regressions)
 prompts/              the prompts used to specify and generate this project
 ```
 

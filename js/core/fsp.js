@@ -109,6 +109,10 @@ FSP.fmtEng = function (x, unit, digits) {
 
 /* ---------- DOM helpers (browser only; call from init/activate, never at load) ---------- */
 FSP.ui = {
+  color(name, fallback) {
+    if (typeof document === 'undefined') return fallback;
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+  },
   modelNotes(panel, id) {
     const notes = FSP.modelNotes && FSP.modelNotes[id]; if (!notes) return;
     const list = FSP.ui.el('ul');
@@ -126,7 +130,7 @@ FSP.ui = {
     const U = FSP.ui, log = !!opts.log, N = 1000; let val = opts.value;
     const toPos = v => log ? Math.round(N * Math.log(v / opts.min) / Math.log(opts.max / opts.min)) : v;
     const fromPos = p => log ? opts.min * Math.pow(opts.max / opts.min, p / N) : p;
-    const rng = U.el('input', { type: 'range', min: log ? 0 : opts.min, max: log ? N : opts.max, step: log ? 1 : (opts.step || 'any') });
+    const rng = U.el('input', { type: 'range', 'aria-label': opts.label, min: log ? 0 : opts.min, max: log ? N : opts.max, step: log ? 1 : (opts.step || 'any') });
     const box = U.el('input', { type: 'text', inputmode: 'decimal', 'aria-label': opts.label, size: 9 });
     const unit = U.el('span', { text: opts.unit || '' });
     const row = U.el('div', { class: 'ctl' }, U.el('label', { text: opts.label }), rng, U.el('span', null, box, unit));
